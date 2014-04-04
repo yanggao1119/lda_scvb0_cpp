@@ -23,9 +23,11 @@ usage
    - --topicwordfile2 <string>
      Same as --topicwordfile, yet for better human consumption only lists the top 100 words and replaces word id by word type;
 
-3. when the -p switch is on, the code runs in prediction mode, i.e., after training topic model, it accepts a one-line compact docword representation from STDIN and outputs to STDOUT the id of the most similar document (1-based) from the training set. For example, line "1 2 3 4" means that in the query document, word id 1 occurs 2 times and word id 3 occurs 4 times. Unknown words from query are all mapped to "<unk>" with word id 0.
+3. when the -p switch is on, the code runs in prediction mode, i.e., after training topic model, it accepts a one-line compact docword representation from STDIN and outputs to STDOUT the id of the most similar document (1-based) from the training set. Note that:
 
-Similarity is by default measured as the L2 distance of topic distribution between the query and training docs, i.e. by default "--similarity l2". Another similarity measure, P(query_doc|training_doc) requires more computation and can be turned on by specifying "--similarity condprob".
+    - format of compact docword representation: line "1 2 3 4" means that in the query document, word id 1 occurs 2 times and word id 3 occurs 4 times. Unknown words from query are all mapped to "<unk>" with word id 0.
+
+    - similarity is by default measured as the L2 distance of topic distribution between the query and training docs, i.e. by default "--similarity l2". Another similarity measure, P(query_doc|training_doc) requires more computation and can be turned on by specifying "--similarity condprob".
 
 4. for other parameters and options, type "./lda_scvb0 --help"
 
