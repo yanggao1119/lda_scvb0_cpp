@@ -18,7 +18,6 @@ $ cat toy_docword2oneline.txt
 9 12 34
 9 56 777
 10 1 1
-01:18:55 [Yangs-MacBook-Air:~/Dropbox/cs686_bigdata/cs686_mini-project/data]
 $ cat toy_docword2oneline.txt | python get_docword2oneline.py 
 11 111 22 222
 33 333

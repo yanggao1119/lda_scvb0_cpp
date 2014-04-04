@@ -37,8 +37,9 @@ dependencies
 
 compiling
 =========
-1. for initial build, type "make";
-2. if you modify code, type "make rebuild"
+1. in my Makefile, I have CXX=/usr/local/bin/g++-4.7, you may need to change it to your g++ path;
+2. for initial build, type "make";
+3. if you modify code, type "make rebuild"
 
 todos
 =====
