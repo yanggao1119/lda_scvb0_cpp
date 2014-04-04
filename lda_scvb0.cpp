@@ -423,19 +423,19 @@ int main( int argc,      // Number of strings in array argv
     try {  
         CmdLine cmd("Command description message", ' ', "0.2");
 
-        ValueArg<string> docwordInFileArg("d","docwordfile","Path to docword file in uci sparse bag-of-words format, note that word index 0 is reserved for unknown words <unk> potentially existing in test doc", true, "","string");
+        ValueArg<string> docwordInFileArg("d","docwordfile","Path to docword file in uci sparse bag-of-words format, where each line is a (doc id, word id, word count) triple delimited by space. Both doc id and word id are 1-based. Word id refers to the corresponding line in the vocab file", true, "","string");
         cmd.add( docwordInFileArg );
 
-        ValueArg<string> vocabInFileArg("v","vocabfile","Path to vocab file in uci sparse bag-of-words format, note that word index 0 is reserved for unknown words <unk> potentially existing in test doc", true, "","string");
+        ValueArg<string> vocabInFileArg("v","vocabfile","Path to vocab file in uci sparse bag-of-words format, note that word index 0 is internally reserved for unknown words <unk> potentially existing in test doc", true, "","string");
         cmd.add( vocabInFileArg );
 
-        ValueArg<string> doctopicOutFileArg("","doctopicfile","Output result of scvb0 training, where each line represents the distribution of the topics for a document, separated by commas", false, "","string");
+        ValueArg<string> doctopicOutFileArg("","doctopicfile","Output result of scvb0 training, where each line represents the distribution of all topics for a document, separated by commas", false, "","string");
         cmd.add( doctopicOutFileArg );
 
-        ValueArg<string> topicwordOutFileArg("","topicwordfile","Output result of scvb0 training, where each line represents the top 100 words in the descending order of probability given the topic. Each line has the format: 'wordID1:weight1, wordID2:weight2...wordID100:weight100', for wordID refer to vocab file", false, "","string");
+        ValueArg<string> topicwordOutFileArg("","topicwordfile","Output result of scvb0 training, where each line lists for a topic all word ids sorted by their probabilities in a descending order. If there are 1000 word types (i.e., 1000 lines in the vocab file), this line will have 1001 entries in the format 'wordID:weight, wordID:weight, ...wordID:weight', where wordID=0 is reserved for unknown words <unk> which may appear in query document", false, "","string");
         cmd.add( topicwordOutFileArg );
 
-        ValueArg<string> topicwordOutFile2Arg("","topicwordfile2","Same as --topicwordfile, yet wordID is replaced by word type for better human consumption", false, "","string");
+        ValueArg<string> topicwordOutFile2Arg("","topicwordfile2","Same as --topicwordfile, yet for better human consumption only lists the top 100 words and replaces word id by word type", false, "","string");
         cmd.add( topicwordOutFile2Arg );
 
         ValueArg<int> sweepArg("s","sweep","Number of sweeps over docword file", false, 10,"int");
@@ -489,7 +489,7 @@ int main( int argc,      // Number of strings in array argv
         ValueArg<string> similarityArg("","similarity","Method to measure similarity between the query and training docs, default to L2 distance of topic distribution. Another similarity measure, P(query_doc|training_doc) requires more computation and can be turned on by specifying --similarity condprob", false, "l2","string");
         cmd.add( similarityArg );
 
-        SwitchArg predictSimilarSwitch("p","predict","Given a test doc from stdin, predict the most similar doc from training set and output to stdout", false);
+        SwitchArg predictSimilarSwitch("p","predict","optional prediction mode, i.e., after training topic model, it accepts a one-line compact docword representation from STDIN and outputs to STDOUT the id of the most similar document (1-based) from the training set", false);
         cmd.add( predictSimilarSwitch );
 
         //TODO: function to specify random seed explicitly

@@ -3,7 +3,7 @@ lda_scvb0_cpp
 
 Yang Gao's implementation of Jimmy Fould's SCVB0 algorithm, coded in C++ with the Eigen matrix package, burn-in for each doc is modified after Michael Hankin's vectorized method.
 
-It does multi-threaded topic model training (simple multi-threading with the openmp package). After that, an optional prediction mode can read query document from STDIN and predict the most similar document from the training set. See below for details.
+It does multi-threaded topic model training (simple multi-threading with the openmp package) and output training log (parameters, perplexity etc) to STDERR. After that, an optional prediction mode can read query document from STDIN and output to STDOUT the most similar document from the training set. See below for details.
 
 usage
 =====
