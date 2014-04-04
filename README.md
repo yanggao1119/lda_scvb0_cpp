@@ -47,6 +47,10 @@ todos
 2. needs profiling to speed up code. I guess Eigen's matrix operations could be speeded up by avoiding temporary copies.
 3. similarity testing by kl divergence.
 
+acknowledgement
+===============
+Jimmy Foulds, Michael Hankin, Shaofeng Mo, Ashish Vaswani, Jonathan Graehl
+
 questions
 =========
 for questions, comments or to report bugs, contact: yanggao1119@gmail.com
