@@ -53,4 +53,4 @@ Jimmy Foulds, Michael Hankin, Shaofeng Mo, Ashish Vaswani, Jonathan Graehl
 
 questions
 =========
-for questions, comments or to report bugs, contact: yanggao1119@gmail.com
+for questions, comments or to report bugs, contact Yang Gao(USC/ISI) at yanggao1119@gmail.com
