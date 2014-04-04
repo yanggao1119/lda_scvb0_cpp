@@ -49,7 +49,7 @@ todos
 
 acknowledgement
 ===============
-I got help from Jimmy Foulds, Michael Hankin, Shaofeng Mo, Ashish Vaswani, Jonathan Graehl
+I got help from Jimmy Foulds, Michael Hankin, Shaofeng Mo, Ashish Vaswani, Shuyang Gao, Jonathan Graehl
 
 questions
 =========
