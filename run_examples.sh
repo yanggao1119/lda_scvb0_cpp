@@ -1,24 +1,20 @@
 #!/bin/bash
 
-# notes:
-#   make sure g++-4.4.7 or above, since I only tested on 4.4.7 and 4.7
-#   run with:
-#   $ sh run_lda_scvb0.sh > log
+#NOTE: uncomment to each demo
+# then run:      
+# $sh run_examples.sh 
 
-# experiments
-# single thread, topic training with uci nips data, write result to files
-#export OMP_NUM_THREADS=1; ./lda_scvb0 --debug -p -d data_uci/docword.nips.txt -v data_uci/vocab.nips.txt -s 10 -k 100 --doctopicfile doctopic.txt --topicwordfile topics.txt --topicwordfile2 topics.vocab.txt
+# 1. single thread, topic training with uci nips data, write result to files; runtime output such as parameter summary, perlexity is output in STDERR, redirected to log file
+export OMP_NUM_THREADS=1; ./lda_scvb0 -d data_uci/docword.nips.txt -v data_uci/vocab.nips.txt -s 10 -k 100 --doctopicfile doctopic.txt --topicwordfile topics.txt --topicwordfile2 topics.vocab.txt 2>log
 
-# single thread, add -p to run prediction debugging to see if we predict each training doc as its most similar doc, based on l2 distance on topic distribution
-#export OMP_NUM_THREADS=1; ./lda_scvb0 --debug -p -d data_uci/docword.nips.txt -v data_uci/vocab.nips.txt -s 10 -k 100 --doctopicfile doctopic.txt --topicwordfile topics.txt --topicwordfile2 topics.vocab.txt
+# 2. as 1., yet using four threads. Note that reported time is cpu time, therefore divide by 2-3.5 to have better idea
+#export OMP_NUM_THREADS=4; ./lda_scvb0 -d data_uci/docword.nips.txt -v data_uci/vocab.nips.txt -s 10 -k 100 --doctopicfile doctopic.txt --topicwordfile topics.txt --topicwordfile2 topics.vocab.txt 2>log
 
-# four threads, note that reported time is cpu time, therefore divide by 2-3.5 to have better idea
-#export OMP_NUM_THREADS=4; ./lda_scvb0 --debug -p -d data_uci/docword.nips.txt -v data_uci/vocab.nips.txt -s 10 -k 100 --doctopicfile doctopic.txt --topicwordfile topics.txt --topicwordfile2 topics.vocab.txt
+# 3. as 2., yet running prediction mode after training, you can type one-line compact docword format, such as "1 2 3 4" and hit enter
+#export OMP_NUM_THREADS=4; ./lda_scvb0 -p -d data_uci/docword.nips.txt -v data_uci/vocab.nips.txt -s 10 -k 100 --doctopicfile doctopic.txt --topicwordfile topics.txt --topicwordfile2 topics.vocab.txt
 
-# four threads, note that reported time is cpu time, therefore divide by 2-3.5 to have better idea
-# debugging mode off, after training accept doc from stdin for similarity testing
-#export OMP_NUM_THREADS=4; cat data_uci/docword.nips.txt | python -u get_docword2oneline.py | ./lda_scvb0 -p -d data_uci/docword.nips.txt -v data_uci/vocab.nips.txt -s 10 -k 100 --doctopicfile doctopic.txt --topicwordfile topics.txt --topicwordfile2 topics.vocab.txt
+# 4. as 3., yet running debug mode during prediction to see if each training document predicts itself as the most similar doc
+#export OMP_NUM_THREADS=4; ./lda_scvb0 --debug -p -d data_uci/docword.nips.txt -v data_uci/vocab.nips.txt -s 10 -k 100 --doctopicfile doctopic.txt --topicwordfile topics.txt --topicwordfile2 topics.vocab.txt 2>log
 
-export OMP_NUM_THREADS=4; ./lda_scvb0 -p -d data_uci/docword.nips.txt -v data_uci/vocab.nips.txt -s 10 -k 100 --doctopicfile doctopic.txt --topicwordfile topics.txt --topicwordfile2 topics.vocab.txt
-
-
+# 5. as 3., yet using files at both ends of the pipe, i.e., query_input >> STDIN and STDOUT >> query_out
+#export OMP_NUM_THREADS=4; cat data_uci/docword.nips.txt | python get_docword2oneline.py | ./lda_scvb0 -p -d data_uci/docword.nips.txt -v data_uci/vocab.nips.txt -s 10 -k 100 --doctopicfile doctopic.txt --topicwordfile topics.txt --topicwordfile2 topics.vocab.txt > query.out 2>log

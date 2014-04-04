@@ -486,6 +486,9 @@ int main( int argc,      // Number of strings in array argv
         ValueArg<int> reportPerpIterArg("","reportperp","Report training perplexity for how many document iterations", false, 1000,"int");
         cmd.add( reportPerpIterArg );
 
+        ValueArg<string> similarityArg("","similarity","Method to measure similarity between the query and training docs, default to L2 distance of topic distribution. Another similarity measure, P(query_doc|training_doc) requires more computation and can be turned on by specifying --similarity condprob", false, "l2","string");
+        cmd.add( similarityArg );
+
         SwitchArg predictSimilarSwitch("p","predict","Given a test doc from stdin, predict the most similar doc from training set and output to stdout", false);
         cmd.add( predictSimilarSwitch );
 
@@ -501,6 +504,7 @@ int main( int argc,      // Number of strings in array argv
         const string f_doctopic = doctopicOutFileArg.getValue();
         const string f_topicword = topicwordOutFileArg.getValue();
         const string f_topicword2 = topicwordOutFile2Arg.getValue();
+        const string similarity = similarityArg.getValue();
 
         const int SWEEP = sweepArg.getValue();
         const int K = numTopicArg.getValue();
@@ -553,8 +557,9 @@ int main( int argc,      // Number of strings in array argv
 
         // read docword file and obtain D, W, C
         int D=0, W=0, C=0;
+        //NOTE: error if we pass this pointer as function arg
         //Document** documents = NULL;
-        Document** documents = read_docword(f_docword, D, W, C);    
+        Document** documents = read_docword(f_docword, D, W, C); 
         //TODO: assert to check size consistency of docword file and vocab file
         //assert (vocabs.size()==W);
    
@@ -626,12 +631,11 @@ int main( int argc,      // Number of strings in array argv
                 // sort vector by descending order, keeping track of indices
                 sort( pair_ind_prob.begin() , pair_ind_prob.end() , pairCmp );
 
-                // output top words for each topic
-                int numTopWords = (pair_ind_prob.size() < 100 ? pair_ind_prob.size() : 100);
-                for (int n=0; n< numTopWords ; n++) 
+                // output all word ids with probability for each topic
+                for (int n=0; n< pair_ind_prob.size() ; n++) 
                 {
                     ofs << pair_ind_prob[n].first << ":" << pair_ind_prob[n].second;
-                    if (n < numTopWords-1) ofs << ", ";
+                    if (n < pair_ind_prob.size()-1) ofs << ", ";
                 }
                 ofs << endl;
             }
@@ -655,7 +659,7 @@ int main( int argc,      // Number of strings in array argv
                 // sort vector by descending order, keeping track of indices
                 sort( pair_ind_prob.begin() , pair_ind_prob.end() , pairCmp );
 
-                // output top words for each topic
+                // output top 100 word types with probability for each topic
                 int numTopWords = (pair_ind_prob.size() < 100 ? pair_ind_prob.size() : 100);
                 for (int n=0; n< numTopWords ; n++) 
                 {
@@ -675,9 +679,12 @@ int main( int argc,      // Number of strings in array argv
             for (int j=0; j<D; j++)
             {
                 clock_t t_b4_test = clock();
-                int best_doc_ind = get_similar_by_l2_distance(documents[j], D, W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_posterior_prob_theta);
-                // slow, not used
-                //int best_doc_ind = get_similar_by_condprob(documents[j], mat_posterior_prob_phi, mat_posterior_prob_theta, D);
+                int best_doc_ind = 0;
+                // default to l2 distance, much faster than condprob
+                if (similarity == "l2")
+                    best_doc_ind = get_similar_by_l2_distance(documents[j], D, W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_posterior_prob_theta);
+                else if (similarity == "condprob")
+                    best_doc_ind = get_similar_by_condprob(documents[j], mat_posterior_prob_phi, mat_posterior_prob_theta, D);
                 cerr << "testdoc " << j+1 << " similar " << best_doc_ind+1 << " time spent: " << float(clock() - t_b4_test)/CLOCKS_PER_SEC << " secs" << endl; 
             }
         }
