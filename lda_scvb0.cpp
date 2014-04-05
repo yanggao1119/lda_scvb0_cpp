@@ -338,9 +338,10 @@ void scvb0(Document ** documents,
     double minibatches_per_corpus = (1.0 * C) / M;
     unsigned long number_minibatches = ceil(float(D)/M);
 
+    clock_t t_b4_all_sweep = clock();
     for (int s=0; s<SWEEP; s++)
     {
-        clock_t t_b4_sweep = clock();
+        clock_t t_b4_this_sweep = clock();
         #pragma omp parallel for
         for (int m=0; m<number_minibatches; m++)
         {
@@ -350,11 +351,15 @@ void scvb0(Document ** documents,
 
             int minibatch_start = m*M;
             int minibatch_end = ( (m+1)*M > D ? D : (m+1)*M );
+            //NOTE: document iteration accumulates from sweeps
             unsigned long doc_iter;
 
             //cerr << "batch " << m << " start " << minibatch_start << " end " <<  minibatch_end << endl;
             for (int j=minibatch_start; j<minibatch_end; j++)
             {
+                //for large dataset, give poor audience some clue where we are; multiple reports in multi-threaded mode
+                if ((j+1)%10000==0) cerr << "processing doc " << (j+1) << endl;
+ 
                 doc_iter = s*D + j + 1;
                 // burnin: update j-th row of mat_N_theta
                 mat_N_theta.row(j) = burnin_doc_j(documents[j], W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_N_theta.row(j));
@@ -372,18 +377,20 @@ void scvb0(Document ** documents,
                     mat_N_phi_hat.row(w_i) += minibatches_per_corpus*w_c*mat_gamma_i_j;
                     mat_N_Z_hat += minibatches_per_corpus*w_c*mat_gamma_i_j;
                 }
-
-                /* 
+                 
+                /*
                 // report perplexity for certain number of doc iterations
+                clock_t t_after_doc_iter = clock();
                 if (doc_iter % REPORT_PERPLEXITY_ITER == 0)
                 {
                     get_mat_posterior_prob_phi(mat_N_phi, ETA, mat_posterior_prob_phi);
                     get_mat_posterior_prob_theta(mat_N_theta, ALPHA, mat_posterior_prob_theta);
                     double perplexity = get_perplexity(documents, D, C, mat_posterior_prob_phi, mat_posterior_prob_theta);
-                    //cerr << "doc_iter " << doc_iter << " perplexity " << perplexity << endl;
+
+                    cerr << "done doc_iter " << doc_iter << ", time spent: " << float(t_after_doc_iter - t_b4_all_sweep)/CLOCKS_PER_SEC << " secs, perplexity: " << perplexity << endl;
                 }*/
 
-            } // finish doc update
+            } // finish all doc updates in batch
 
             // batch update
             double rho_phi = S/pow(TAO+doc_iter, KAPPA);
@@ -397,11 +404,11 @@ void scvb0(Document ** documents,
         get_mat_posterior_prob_phi(mat_N_phi, ETA, mat_posterior_prob_phi);
         get_mat_posterior_prob_theta(mat_N_theta, ALPHA, mat_posterior_prob_theta);
         double perplexity = get_perplexity(documents, D, C, mat_posterior_prob_phi, mat_posterior_prob_theta);
-        clock_t t_after_sweep = clock();
-        cerr << "done sweep " << s << ", time spent: " << float(t_after_sweep - t_b4_sweep)/CLOCKS_PER_SEC << " secs, perplexity: " << perplexity << endl;
-        
+       
+        clock_t t_after_this_sweep = clock(); 
+        cerr << "done sweep " << s << ", time spent: " << float(t_after_this_sweep - t_b4_this_sweep)/CLOCKS_PER_SEC << " secs, perplexity: " << perplexity << endl;
         // check timeout!
-        if ( float(t_after_sweep - t_b4_scvb0)/CLOCKS_PER_SEC > TIME_LIMIT) 
+        if ( float(t_after_this_sweep - t_b4_scvb0)/CLOCKS_PER_SEC > TIME_LIMIT) 
         {
             cerr << "reaching time limit " << TIME_LIMIT << " secs, stop scvb0" << endl;
             return;
@@ -480,10 +487,10 @@ int main( int argc,      // Number of strings in array argv
         ValueArg<double> kappa2Arg("","kappa2","Kappa2 to compute stepsize for doc iteration update", false, 0.9,"double");
         cmd.add( kappa2Arg );
 
-        ValueArg<int> timeLimitArg("","timelimit","Time limit for training, in seconds", false, 36000,"int");
+        ValueArg<int> timeLimitArg("","timelimit","Time limit for training, in seconds", false, 360000,"int");
         cmd.add( timeLimitArg );
 
-        ValueArg<int> reportPerpIterArg("","reportperp","Report training perplexity for how many document iterations", false, 1000,"int");
+        ValueArg<int> reportPerpIterArg("","reportperp","Report training perplexity for how many document iterations", false, 10000,"int");
         cmd.add( reportPerpIterArg );
 
         ValueArg<string> similarityArg("","similarity","Method to measure similarity between the query and training docs, default to L2 distance of topic distribution. Another similarity measure, P(query_doc|training_doc) requires more computation and can be turned on by specifying --similarity condprob", false, "l2","string");
