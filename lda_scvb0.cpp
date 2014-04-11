@@ -19,9 +19,22 @@ using namespace Eigen;
 using namespace TCLAP;
 
 
+//TODO: accept / or internally convert using TF-IDF
+//TODO: accept external N_theta/prob_theta and N_phi/prob_phi files?
+
+
 // pair comparer copied from shaofeng mo
-bool pairCmp( const pair<int,double>& p1, const pair<int,double>& p2){
+bool pairCmpDescend( const pair<int,double>& p1, const pair<int,double>& p2){
   if( p1.second - p2.second > 0.00000000001 ){
+    return true;
+  }else{
+    return false;
+  }
+}
+
+
+bool pairCmpAscend( const pair<int,double>& p1, const pair<int,double>& p2){
+  if( p1.second - p2.second < 0.00000000001 ){
     return true;
   }else{
     return false;
@@ -93,8 +106,7 @@ Document** read_docword(string file, int & D, int & W, int & C)
         }
         else if (line_count == 2)
         {
-            //NOTE: different from uci bag-of-words sparse format, word index w_i is 0-based and 0 is reserved for unknown words <unk> potentially existing in test doc, therefore +1
-            W = atoi(line.c_str()) + 1;
+            W = atoi(line.c_str());
         }
         else if (line_count != 3) 
         {
@@ -109,7 +121,6 @@ Document** read_docword(string file, int & D, int & W, int & C)
             documents[d_j]->word_count.push_back(w_c);
         }
     }
-    cerr << "D:" << D << "\tW:" << W << "(adding word index 0 for unknown word type <unk>)\tC:" << C << endl; 
     cerr << "done reading docword file, time spent: " << float(clock() - t_b4_read)/CLOCKS_PER_SEC << " secs" << endl << endl;
     return documents;
 }
@@ -230,8 +241,8 @@ MatrixXd burnin_doc_j(const Document * doc_j,
 }
 
 
-// predict doc in training set that is most similar to testdoc
-int get_similar_by_l2_distance(const Document * testdoc, 
+void get_similar_by_l2_distance(vector< pair<int, double> > & pair_docind_score,
+                                const Document * testdoc, 
                                 const int & D,
                                 const int & W,
                                 const int & K,
@@ -244,35 +255,31 @@ int get_similar_by_l2_distance(const Document * testdoc,
                                 const MatrixXd & mat_N_phi,
                                 const MatrixXd & mat_posterior_prob_theta)
 {
+    // given testdoc, rank training doc by similarity: smaller l2 distance, higher rank
+    // l2 distance is less expensive to compute than condprob
     MatrixXd mat_N_theta_test = ((MatrixXd::Random(1, K)*0.5).array() + 1).matrix();
     mat_N_theta_test = burnin_doc_j(testdoc, W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_N_theta_test);
     MatrixXd mat_posterior_prob_theta_test = MatrixXd::Constant(1, K, 0);
     get_mat_posterior_prob_theta(mat_N_theta_test, ALPHA, mat_posterior_prob_theta_test);
-   
-    int best_doc_ind = 0;
-    double best_dist = std::numeric_limits<long double>::infinity(); 
+  
     for (int j=0; j<D; j++)
     {
         double dist = (mat_posterior_prob_theta_test - mat_posterior_prob_theta.row(j)).norm();
-        if (dist < best_dist) 
-        {
-            best_doc_ind = j; 
-            best_dist = dist;
-        } 
+        pair_docind_score.push_back( pair<int, double> (j, dist) );
     }
-    return best_doc_ind;
+
+    sort( pair_docind_score.begin() , pair_docind_score.end() , pairCmpAscend );
 }
 
 
-int get_similar_by_condprob(const Document * testdoc, 
+void get_similar_by_logcondprob(vector< pair<int, double> > & pair_docind_score,
+                            const Document * testdoc, 
                             const MatrixXd & mat_posterior_prob_phi,
                             const MatrixXd & mat_posterior_prob_theta,
                             const int & D)
 {
-    // given testdoc, predict the most similar doc we have in training
-    // implementing eqn 9 in "Probabilistic Topic Models" by Steyvers and Griffiths
-    int best_doc_ind = 0;
-    double best_log_doc_prob = -std::numeric_limits<long double>::infinity(); 
+    // given testdoc, rank training doc by log of conditional prob p(q|d): bigger p, higher rank
+    // p(q|d) is from eqn 9 in "Probabilistic Topic Models" by Steyvers and Griffiths
     for (int j=0; j<D; j++)
     {
         int num_unique_words = testdoc->word_ind.size();
@@ -285,13 +292,10 @@ int get_similar_by_condprob(const Document * testdoc,
             double log_word_prob_c = log2(word_prob) * w_c;
             log_doc_prob += log_word_prob_c;        
         }
-        if (log_doc_prob > best_log_doc_prob) 
-        {
-            best_doc_ind = j; 
-            best_log_doc_prob = log_doc_prob;
-        } 
+        pair_docind_score.push_back( pair<int, double> (j, log_doc_prob) );
     }
-    return best_doc_ind;
+
+    sort( pair_docind_score.begin() , pair_docind_score.end() , pairCmpDescend );
 }
 
 
@@ -321,11 +325,11 @@ void scvb0(Document ** documents,
           MatrixXd & mat_posterior_prob_theta)
 {
     bool debug = false;
-    cerr << "start scvb0" << endl;
+    cerr << "Start scvb0" << endl;
     clock_t t_b4_scvb0 = clock();
 
     //randomization is key, yet how to randomize and whether or not to normalize is not important 
-    cerr << "initializing..." << endl;
+    cerr << "Initializing..." << endl;
     clock_t t_b4_init = clock();
     mat_N_phi = ((MatrixXd::Random(W, K)*0.5).array() + 1).matrix();
     mat_N_phi = mat_N_phi*float(C)/mat_N_phi.sum();
@@ -430,11 +434,15 @@ int main( int argc,      // Number of strings in array argv
     try {  
         CmdLine cmd("Command description message", ' ', "0.2");
 
-        ValueArg<string> docwordInFileArg("d","docwordfile","Path to docword file in uci sparse bag-of-words format, where each line is a (doc id, word id, word count) triple delimited by space. Both doc id and word id are 1-based. Word id refers to the corresponding line in the vocab file", true, "","string");
+        ValueArg<string> docwordInFileArg("d","docwordfile","Path to docword file for training topic model, in uci sparse bag-of-words format, where each line is a (doc id, word id, word count) triple delimited by space. Both doc id and word id are 1-based. Word id refers to the corresponding line in the vocab file", true, "","string");
         cmd.add( docwordInFileArg );
 
-        ValueArg<string> vocabInFileArg("v","vocabfile","Path to vocab file in uci sparse bag-of-words format, note that word index 0 is internally reserved for unknown words <unk> potentially existing in test doc", true, "","string");
+        ValueArg<string> vocabInFileArg("v","vocabfile","Path to vocab file associated with docword file for training topic model, in uci sparse bag-of-words format, note that word index 0 is internally reserved for unknown words <unk> potentially existing in test doc", true, "","string");
         cmd.add( vocabInFileArg );
+
+        //TODO: is it too slow to handle unknown words and convert to uci format externally in preprocessing?
+        ValueArg<string> testInFileArg("t","testfile","<CURRENT TESTING IS CHEATING!> Path to the test file in the same format as docword file for training, sharing the same vocab file with training. Words that don't show up in the vocab file should have already been assigned word index 0 which corresponds to <unk>", false, "","string");
+        cmd.add( testInFileArg );
 
         ValueArg<string> doctopicOutFileArg("","doctopicfile","Output result of scvb0 training, where each line represents the distribution of all topics for a document, separated by commas", false, "","string");
         cmd.add( doctopicOutFileArg );
@@ -493,8 +501,11 @@ int main( int argc,      // Number of strings in array argv
         ValueArg<int> reportPerpIterArg("","reportperp","Report training perplexity for how many document iterations", false, 10000,"int");
         cmd.add( reportPerpIterArg );
 
-        ValueArg<string> similarityArg("","similarity","Method to measure similarity between the query and training docs, default to L2 distance of topic distribution. Another similarity measure, P(query_doc|training_doc) requires more computation and can be turned on by specifying --similarity condprob", false, "l2","string");
-        cmd.add( similarityArg );
+        ValueArg<string> similarMetricArg("","similarmetric","Method to measure similarity between the query and training docs, default to L2 distance of topic distribution. Another similarity measure, P(query_doc|training_doc) requires more computation and can be turned on by specifying condprob as value", false, "l2","string");
+        cmd.add( similarMetricArg );
+
+        ValueArg<int> similarSizeArg("","similarsize","for similarity test, how many top similar docs to report", false, 50,"int");
+        cmd.add( similarSizeArg );
 
         SwitchArg predictSimilarSwitch("p","predict","optional prediction mode, i.e., after training topic model, it accepts a one-line compact docword representation from STDIN and outputs to STDOUT the id of the most similar document (1-based) from the training set", false);
         cmd.add( predictSimilarSwitch );
@@ -508,10 +519,10 @@ int main( int argc,      // Number of strings in array argv
         // Get the value parsed by each arg. 
         const string f_docword = docwordInFileArg.getValue();
         const string f_vocab = vocabInFileArg.getValue();
+        const string f_test = testInFileArg.getValue();
         const string f_doctopic = doctopicOutFileArg.getValue();
         const string f_topicword = topicwordOutFileArg.getValue();
         const string f_topicword2 = topicwordOutFile2Arg.getValue();
-        const string similarity = similarityArg.getValue();
 
         const int SWEEP = sweepArg.getValue();
         const int K = numTopicArg.getValue();
@@ -535,6 +546,9 @@ int main( int argc,      // Number of strings in array argv
         const int TIME_LIMIT = timeLimitArg.getValue();
         const int REPORT_PERPLEXITY_ITER = reportPerpIterArg.getValue();
 
+        const string SIMILAR_METRIC = similarMetricArg.getValue();
+        const int SIMILAR_SIZE = similarSizeArg.getValue();
+
         const bool predictSimilar = predictSimilarSwitch.getValue();
         const bool debug = debugSwitch.getValue();
 
@@ -543,6 +557,7 @@ int main( int argc,      // Number of strings in array argv
 
         cerr << "Input docword file: " << f_docword << endl;
         cerr << "Input vocab file: " << f_vocab << endl;
+        cerr << "Input test docword file: " << f_test << endl;
         cerr << "Output doctopic file: " << f_doctopic << endl;
         cerr << "Output topicword file: " << f_topicword << endl;
         cerr << "Output topicword2 file: " << f_topicword2 << endl;
@@ -554,6 +569,7 @@ int main( int argc,      // Number of strings in array argv
         cerr << "S2: " << S2 << "\tTAO2: " << TAO2 << "\tKAPPA2: " << KAPPA2 << endl; 	
         cerr << "RANDSEED_phi: " << RANDSEED_phi << "\tRANDSEED_theta: " << RANDSEED_theta << endl;
         cerr << "TIME_LIMIT: " << TIME_LIMIT << "\tREPORT_PERPLEXITY_ITER: " << REPORT_PERPLEXITY_ITER << endl;
+        cerr << "SIMILAR_METRIC: " << SIMILAR_METRIC << "\tSIMILAR_SIZE: " << SIMILAR_SIZE << endl;
         cerr << endl;
 
         // read vocab file
@@ -566,10 +582,15 @@ int main( int argc,      // Number of strings in array argv
         int D=0, W=0, C=0;
         //NOTE: error if we pass this pointer as function arg
         //Document** documents = NULL;
-        Document** documents = read_docword(f_docword, D, W, C); 
+        Document** documents = read_docword(f_docword, D, W, C);
         //TODO: assert to check size consistency of docword file and vocab file
         //assert (vocabs.size()==W);
-   
+ 
+        //NOTE: different from uci bag-of-words sparse format, word index w_i is internally 0-based
+        // 0 is reserved for unknown words <unk> potentially existing in test doc, therefore W+1
+        W += 1; 
+        cerr << "D:" << D << "\tW:" << W << "(adding word index 0 for unknown word type <unk>)\tC:" << C << endl; 
+  
         // report empty doc to stdout, convert internal 0-based doc ind to 1-based
         int empty_doc_count = 0;
         for (int d=0; d<D; d++)
@@ -612,9 +633,9 @@ int main( int argc,      // Number of strings in array argv
         // output results to files
         if (f_doctopic != "")
         {
-            IOFormat matrixFormat(FullPrecision, DontAlignCols, ", ", "\n", "", "", "", "");
-            cerr << "writing to doctopic file: " << f_doctopic << endl;
+            cerr << "Writing to doctopic file: " << f_doctopic << endl;
             clock_t t_b4_write = clock();
+            IOFormat matrixFormat(FullPrecision, DontAlignCols, ", ", "\n", "", "", "", "");
             ofstream ofs;
             ofs.open(f_doctopic.c_str());
             ofs << mat_posterior_prob_theta.format(matrixFormat) << endl;
@@ -623,26 +644,26 @@ int main( int argc,      // Number of strings in array argv
         } 
         if (f_topicword != "")
         {
-            cerr << "writing to topicword file: " << f_topicword << endl;
+            cerr << "Writing to topicword file: " << f_topicword << endl;
             clock_t t_b4_write = clock();
             ofstream ofs;
             ofs.open(f_topicword.c_str());
             for (int c=0; c<mat_posterior_prob_phi.cols(); c++)
             {
                 // create vector for each column in matrix
-                vector< pair<int, double> > pair_ind_prob;
+                vector< pair<int, double> > pair_wordind_prob;
                 for (int r=0; r<mat_posterior_prob_phi.rows(); r++)
                 {
-                    pair_ind_prob.push_back( pair<int, double> (r, mat_posterior_prob_phi(r, c)) );
+                    pair_wordind_prob.push_back( pair<int, double> (r, mat_posterior_prob_phi(r, c)) );
                 }
                 // sort vector by descending order, keeping track of indices
-                sort( pair_ind_prob.begin() , pair_ind_prob.end() , pairCmp );
+                sort( pair_wordind_prob.begin() , pair_wordind_prob.end() , pairCmpDescend );
 
                 // output all word ids with probability for each topic
-                for (int n=0; n< pair_ind_prob.size() ; n++) 
+                for (int n=0; n< pair_wordind_prob.size() ; n++) 
                 {
-                    ofs << pair_ind_prob[n].first << ":" << pair_ind_prob[n].second;
-                    if (n < pair_ind_prob.size()-1) ofs << ", ";
+                    ofs << pair_wordind_prob[n].first << ":" << pair_wordind_prob[n].second;
+                    if (n < pair_wordind_prob.size()-1) ofs << ", ";
                 }
                 ofs << endl;
             }
@@ -651,26 +672,26 @@ int main( int argc,      // Number of strings in array argv
         } 
         if (f_topicword2 != "")
         {
-            cerr << "writing to topicword file with vocab: " << f_topicword2 << endl;
+            cerr << "Writing to topicword file with vocab: " << f_topicword2 << endl;
             clock_t t_b4_write = clock();
             ofstream ofs;
             ofs.open(f_topicword2.c_str());
             for (int c=0; c<mat_posterior_prob_phi.cols(); c++)
             {
                 // create vector for each column in matrix
-                vector< pair<int, double> > pair_ind_prob;
+                vector< pair<int, double> > pair_wordind_prob;
                 for (int r=0; r<mat_posterior_prob_phi.rows(); r++)
                 {
-                    pair_ind_prob.push_back( pair<int, double> (r, mat_posterior_prob_phi(r, c)) );
+                    pair_wordind_prob.push_back( pair<int, double> (r, mat_posterior_prob_phi(r, c)) );
                 }
                 // sort vector by descending order, keeping track of indices
-                sort( pair_ind_prob.begin() , pair_ind_prob.end() , pairCmp );
+                sort( pair_wordind_prob.begin() , pair_wordind_prob.end() , pairCmpDescend );
 
                 // output top 100 word types with probability for each topic
-                int numTopWords = (pair_ind_prob.size() < 100 ? pair_ind_prob.size() : 100);
+                int numTopWords = (pair_wordind_prob.size() < 100 ? pair_wordind_prob.size() : 100);
                 for (int n=0; n< numTopWords ; n++) 
                 {
-                    ofs << vocabs[ pair_ind_prob[n].first ] << ":" << pair_ind_prob[n].second;
+                    ofs << vocabs[ pair_wordind_prob[n].first ] << ":" << pair_wordind_prob[n].second;
                     if (n < numTopWords-1) ofs << ", ";
                 }
                 ofs << endl;
@@ -679,36 +700,87 @@ int main( int argc,      // Number of strings in array argv
             cerr << "done, time spent: " << float(clock() - t_b4_write)/CLOCKS_PER_SEC << " secs" << endl << endl;
         } 
 
-        // debug similarity testing: sanity check to see if each training doc predicts itself as the most similar doc
-        // print to stdout, convert internal 0-based doc ind to 1-based
-        if ( predictSimilar && debug )
+        /////////////////////////////////////////////////////////////
+        //the following are optional, subsequent modes after training
+        /////////////////////////////////////////////////////////////
+
+        // mode 1: output to STDERR perplexity of the test file
+        //TODO: jimmy foulds says this test is cheating, because we optimize theta for test doc first. To not cheat, there are two ways:
+        //1) split each test doc into two parts, making sure words are disjoint; then estimate theta on one part and calculate perplexity on the other
+        //2) left-to-right as Wallach et al., evaluation methods for topic models
+        if (f_test != "")
         {
-            for (int j=0; j<D; j++)
+            cerr << "Compute perplexity of test corpus" << endl;
+            clock_t t_b4_test = clock();
+
+            int D_test=0, W_test=0, C_test=0;
+            Document** documents_test = read_docword(f_test, D_test, W_test, C_test); 
+            cerr << "D:" << D << "\tW:" << W << "\tC:" << C << endl; 
+ 
+            MatrixXd mat_N_theta_test = MatrixXd::Constant(D_test, K, 0.0);
+            for (int j=0; j<D_test; j++)
             {
-                clock_t t_b4_test = clock();
-                int best_doc_ind = 0;
-                // default to l2 distance, much faster than condprob
-                if (similarity == "l2")
-                    best_doc_ind = get_similar_by_l2_distance(documents[j], D, W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_posterior_prob_theta);
-                else if (similarity == "condprob")
-                    best_doc_ind = get_similar_by_condprob(documents[j], mat_posterior_prob_phi, mat_posterior_prob_theta, D);
-                cerr << "testdoc " << j+1 << " similar " << best_doc_ind+1 << " time spent: " << float(clock() - t_b4_test)/CLOCKS_PER_SEC << " secs" << endl; 
+                mat_N_theta_test.row(j) = burnin_doc_j(documents_test[j], W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_N_theta_test.row(j));
+            }
+            MatrixXd mat_posterior_prob_theta_test;
+            get_mat_posterior_prob_theta(mat_N_theta_test, ALPHA, mat_posterior_prob_theta_test);
+            double perplexity_test = get_perplexity(documents_test, D_test, C_test, mat_posterior_prob_phi, mat_posterior_prob_theta);
+            cerr << "test perplexity: " << perplexity_test << endl; 
+            cerr << "done, time spent: " << float(clock() - t_b4_test)/CLOCKS_PER_SEC << " secs" << endl << endl;
+        }
+
+        // mode 2: similarity testing
+        // input from STDIN, output to STDOUT, convert internal 0-based doc ind to 1-based
+        if (predictSimilar && ! debug)
+        {
+            cerr << "\nReading input from STDIN" << endl;
+            while (cin) 
+            {
+                string testdoc_line;
+                getline(cin, testdoc_line);
+                if (!cin.eof())
+                {
+                    clock_t t_b4_test = clock();
+                    Document * testdoc = get_str2doc(testdoc_line);
+    
+                    // get paired (doc_ind, score) vector with similarity measure
+                    vector< pair<int, double> > pair_docind_score;
+                    if (SIMILAR_METRIC == "l2")
+                        get_similar_by_l2_distance(pair_docind_score, testdoc, D, W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_posterior_prob_theta);
+                    else if (SIMILAR_METRIC == "condprob")
+                        get_similar_by_logcondprob(pair_docind_score, testdoc, mat_posterior_prob_phi, mat_posterior_prob_theta, D);
+    
+                    // output to STDOUT in one line
+                    int numTopSimilar = (pair_docind_score.size() < SIMILAR_SIZE ? pair_docind_score.size() : SIMILAR_SIZE);
+                    for (int p=0; p<numTopSimilar; p++)
+                    {
+                        cout << pair_docind_score[p].first+1 << ":" << pair_docind_score[p].second;
+                        if (p < numTopSimilar-1) cout << " ";
+                    }
+                    cout << endl;
+                    cerr << "time spent: " << float(clock() - t_b4_test)/CLOCKS_PER_SEC << " secs" << endl; 
+                    cout << endl;
+                }
             }
         }
 
-        // similarity testing
-        // print to stdout, convert internal 0-based doc ind to 1-based
-        if (predictSimilar && ! debug) cerr << "\nReading input from STDIN" << endl;
-        while ( predictSimilar && (! debug) && cin) 
+        // mode 3: debug training and similarity testing: sanity check to see if each training doc predicts itself as the most similar doc
+        if ( predictSimilar && debug )
         {
-            string testdoc_line;
-            getline(cin, testdoc_line);
-            if (!cin.eof())
+            cerr << "\nDebugging training and similarity test" << endl;
+            for (int j=0; j<D; j++)
             {
-                cerr << "testdoc_line " << testdoc_line << endl;
-                Document * testdoc = get_str2doc(testdoc_line);
-                int best_doc_ind = get_similar_by_l2_distance(testdoc, D, W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_posterior_prob_theta);
-                cout << "most similar to doc:" << best_doc_ind+1 << endl << endl;
+                clock_t t_b4_test = clock();
+                vector< pair<int, double> > pair_docind_score;
+                if (SIMILAR_METRIC == "l2")
+                    get_similar_by_l2_distance(pair_docind_score, documents[j], D, W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_posterior_prob_theta);
+                else if (SIMILAR_METRIC == "condprob")
+                    get_similar_by_logcondprob(pair_docind_score, documents[j], mat_posterior_prob_phi, mat_posterior_prob_theta, D);
+                if (pair_docind_score[0].first == j)
+                    cerr << "training doc " << j+1 << " ok";
+                else
+                    cerr << "training doc " << j+1 << " does not predict itself as most similar";
+                cerr << ", time spent: " << float(clock() - t_b4_test)/CLOCKS_PER_SEC << " secs" << endl; 
             }
         }
 
