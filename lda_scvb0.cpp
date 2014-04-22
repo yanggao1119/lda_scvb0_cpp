@@ -19,7 +19,6 @@ using namespace Eigen;
 using namespace TCLAP;
 
 
-//TODO: accept / or internally convert using TF-IDF
 //TODO: accept external N_theta/prob_theta and N_phi/prob_phi files?
 
 
