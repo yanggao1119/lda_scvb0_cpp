@@ -17,13 +17,13 @@ usage
    - --doctopicfile <string>
      Output result of scvb0 training, where each line represents the distribution of all topics for a document, separated by commas;
    - --topicwordfile <string>
-     Output result of scvb0 training, where each line lists for a topic all word ids sorted by their probabilities in a descending order. If there are 1000 word types (i.e., 1000 lines in the vocab file), this line will have 1001 entries in the format 'wordID:weight, wordID:weight, ...wordID:weight', where wordID=0 is reserved for unknown words <unk> which may appear in query document;
+     Output result of scvb0 training, where each line lists for a topic all word ids sorted by their probabilities in a descending order. If there are 1000 word types (i.e., 1000 lines in the vocab file), this line will have 1000 entries in the format 'wordID:weight, wordID:weight, ...wordID:weight';
    - --topicwordfile2 <string>
      Same as --topicwordfile, yet for better human consumption only lists the top 100 words and replaces word id by word type;
 
 - when the -p switch is on, the code runs in prediction mode, i.e., after training topic model, it accepts a one-line compact docword representation from STDIN and outputs to STDOUT the id of the top 50 (by default, can be changed by switch) most similar document (1-based) from the training set. Note that:
 
-    - format of compact docword representation: line "1 2 3 4" means that in the query document, word id 1 occurs 2 times and word id 3 occurs 4 times. Unknown words from query are all mapped to "<unk>" with word id 0.
+    - format of compact docword representation: line "1 2 3 4" means that in the query document, word id 1 occurs 2 times and word id 3 occurs 4 times.
     - similarity is by default measured as the L2 distance of topic distribution between the query and training docs, i.e. by default "--similarmetric l2". Another similarity measure, P(query_doc|training_doc) requires more computation and can be turned on by specifying "--similarmetric condprob".
 
 - for other parameters and options, type "./lda_scvb0 --help"
