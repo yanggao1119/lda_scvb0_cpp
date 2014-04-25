@@ -56,6 +56,8 @@ Document* get_str2doc(string str)
     int w_i, w_c; 
     while (iss >> w_i >> w_c) 
     {
+        //NOTE: convert 1-based word and doc index to be internally 0-based
+        w_i -= 1;
         doc->word_ind.push_back(w_i);
         doc->word_count.push_back(w_c);
     }
@@ -70,8 +72,8 @@ Document* get_str2doc(string str)
 
 void read_vocab(string file, vector<string> & vocabs) 
 {
+    cerr << "Start reading vocab file" << endl;
     clock_t t_b4_read = clock();
-    vocabs.push_back("<unk>");    
 
     ifstream ifs(file.c_str());
     for (string line ; getline(ifs, line); )
@@ -84,6 +86,7 @@ void read_vocab(string file, vector<string> & vocabs)
 
 Document** read_docword(string file, int & D, int & W, int & C) 
 {
+    cerr << "Start reading docword file" << endl;
     clock_t t_b4_read = clock();
 
     Document** documents;
@@ -114,12 +117,15 @@ Document** read_docword(string file, int & D, int & W, int & C)
             int d_j, w_i, w_c;
             iss >> d_j >> w_i >> w_c;
             C += w_c;
+            //NOTE: convert 1-based word and doc index to be internally 0-based
+            w_i -= 1;
             d_j -= 1;
             //cerr << d_j << " " << w_i << " " << w_c << endl;
             documents[d_j]->word_ind.push_back(w_i);
             documents[d_j]->word_count.push_back(w_c);
         }
     }
+    cerr << "D:" << D << "\tW:" << W << "\tC:" << C << endl; 
     cerr << "done reading docword file, time spent: " << float(clock() - t_b4_read)/CLOCKS_PER_SEC << " secs" << endl << endl;
     return documents;
 }
@@ -436,17 +442,16 @@ int main( int argc,      // Number of strings in array argv
         ValueArg<string> docwordInFileArg("d","docwordfile","Path to docword file for training topic model, in uci sparse bag-of-words format, where each line is a (doc id, word id, word count) triple delimited by space. Both doc id and word id are 1-based. Word id refers to the corresponding line in the vocab file", true, "","string");
         cmd.add( docwordInFileArg );
 
-        ValueArg<string> vocabInFileArg("v","vocabfile","Path to vocab file associated with docword file for training topic model, in uci sparse bag-of-words format, note that word index 0 is internally reserved for unknown words <unk> potentially existing in test doc", true, "","string");
+        ValueArg<string> vocabInFileArg("v","vocabfile","Path to vocab file associated with docword file for training topic model, in uci sparse bag-of-words format", true, "","string");
         cmd.add( vocabInFileArg );
 
-        //TODO: is it too slow to handle unknown words and convert to uci format externally in preprocessing?
-        ValueArg<string> testInFileArg("t","testfile","<CURRENT TESTING IS CHEATING!> Path to the test file in the same format as docword file for training, sharing the same vocab file with training. Words that don't show up in the vocab file should have already been assigned word index 0 which corresponds to <unk>", false, "","string");
+        ValueArg<string> testInFileArg("t","testfile","<CURRENT TESTING IS CHEATING!> Path to the test file in the same format as docword file for training, sharing the same vocab file with training. Words that don't show up in the vocab file should have already been filtered out", false, "","string");
         cmd.add( testInFileArg );
 
         ValueArg<string> doctopicOutFileArg("","doctopicfile","Output result of scvb0 training, where each line represents the distribution of all topics for a document, separated by commas", false, "","string");
         cmd.add( doctopicOutFileArg );
 
-        ValueArg<string> topicwordOutFileArg("","topicwordfile","Output result of scvb0 training, where each line lists for a topic all word ids sorted by their probabilities in a descending order. If there are 1000 word types (i.e., 1000 lines in the vocab file), this line will have 1001 entries in the format 'wordID:weight, wordID:weight, ...wordID:weight', where wordID=0 is reserved for unknown words <unk> which may appear in query document", false, "","string");
+        ValueArg<string> topicwordOutFileArg("","topicwordfile","Output result of scvb0 training, where each line lists for a topic all word ids sorted by their probabilities in a descending order. If there are 1000 word types (i.e., 1000 lines in the vocab file), this line will have 1000 entries in the format 'wordID:weight, wordID:weight, ...wordID:weight'", false, "","string");
         cmd.add( topicwordOutFileArg );
 
         ValueArg<string> topicwordOutFile2Arg("","topicwordfile2","Same as --topicwordfile, yet for better human consumption only lists the top 100 words and replaces word id by word type", false, "","string");
@@ -584,11 +589,6 @@ int main( int argc,      // Number of strings in array argv
         Document** documents = read_docword(f_docword, D, W, C);
         //TODO: assert to check size consistency of docword file and vocab file
         //assert (vocabs.size()==W);
- 
-        //NOTE: different from uci bag-of-words sparse format, word index w_i is internally 0-based
-        // 0 is reserved for unknown words <unk> potentially existing in test doc, therefore W+1
-        W += 1; 
-        cerr << "D:" << D << "\tW:" << W << "(adding word index 0 for unknown word type <unk>)\tC:" << C << endl; 
   
         // report empty doc to stdout, convert internal 0-based doc ind to 1-based
         int empty_doc_count = 0;
@@ -659,9 +659,10 @@ int main( int argc,      // Number of strings in array argv
                 sort( pair_wordind_prob.begin() , pair_wordind_prob.end() , pairCmpDescend );
 
                 // output all word ids with probability for each topic
+                // convert internal 0-based word ind to 1-based
                 for (int n=0; n< pair_wordind_prob.size() ; n++) 
                 {
-                    ofs << pair_wordind_prob[n].first << ":" << pair_wordind_prob[n].second;
+                    ofs << pair_wordind_prob[n].first + 1 << ":" << pair_wordind_prob[n].second;
                     if (n < pair_wordind_prob.size()-1) ofs << ", ";
                 }
                 ofs << endl;
@@ -714,7 +715,6 @@ int main( int argc,      // Number of strings in array argv
 
             int D_test=0, W_test=0, C_test=0;
             Document** documents_test = read_docword(f_test, D_test, W_test, C_test); 
-            cerr << "D:" << D << "\tW:" << W << "\tC:" << C << endl; 
  
             MatrixXd mat_N_theta_test = MatrixXd::Constant(D_test, K, 0.0);
             for (int j=0; j<D_test; j++)
