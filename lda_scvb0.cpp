@@ -13,13 +13,15 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <tclap/CmdLine.h>
+//NOTE: for creating dirs, maybe useful for sth else
+#include <sys/types.h>
+#include <sys/stat.h>
 
 using namespace std;
 using namespace Eigen;
 using namespace TCLAP;
 
 
-//TODO: accept external N_theta/prob_theta and N_phi/prob_phi files?
 //TODO: streamed prediction
 
 
@@ -503,9 +505,11 @@ int main( int argc,      // Number of strings in array argv
         ValueArg<string> testInFileArg("t","testfile","<CURRENT TESTING IS CHEATING!> Path to the test file in the same format as docword file for training, sharing the same vocab file with training. Words that don't show up in the vocab file should have already been filtered out", false, "","string");
         cmd.add( testInFileArg );
 
-        //TODO;
-        ValueArg<string> matParamInDirArg("","matdir", "directory of previously trained model to be loaded, must contain four files: {mat_N_phi, mat_N_theta, mat_posterior_prob_phi, mat_posterior_prob_theta}.txt", false, ".","string");
+        ValueArg<string> matParamInDirArg("","inmatdir", "directory of previously trained model to be loaded, which contain four files: {mat_N_phi, mat_N_theta, mat_posterior_prob_phi, mat_posterior_prob_theta}.txt", false, "","string");
         cmd.add( matParamInDirArg );
+
+        ValueArg<string> matParamOutDirArg("","outmatdir", "directory to dump trained model, which contain four files: {mat_N_phi, mat_N_theta, mat_posterior_prob_phi, mat_posterior_prob_theta}.txt", false, "","string");
+        cmd.add( matParamOutDirArg );
 
         ValueArg<string> doctopicOutFileArg("","doctopicfile","Output result of scvb0 training, where each line represents the distribution of all topics for a document, separated by commas", false, "","string");
         cmd.add( doctopicOutFileArg );
@@ -573,9 +577,6 @@ int main( int argc,      // Number of strings in array argv
         SwitchArg predictSimilarSwitch("p","predict","optional prediction mode, i.e., after training topic model, it accepts a one-line compact docword representation from STDIN and outputs to STDOUT the id of the most similar document (1-based) from the training set", false);
         cmd.add( predictSimilarSwitch );
 
-        SwitchArg saveMatrixSwitch("","savematrix","write trained matrix params to files: {mat_N_phi, mat_N_theta, mat_posterior_prob_phi, mat_posterior_prob_theta}.txt", false);
-        cmd.add( saveMatrixSwitch );
-
         //TODO: function to specify random seed explicitly
         SwitchArg debugSwitch("","debug","running debug mode, specifying random seed and sanity check to see if each training doc predicts itself as the most similar doc", false);
         cmd.add( debugSwitch );
@@ -586,7 +587,8 @@ int main( int argc,      // Number of strings in array argv
         const string f_docword = docwordInFileArg.getValue();
         const string f_vocab = vocabInFileArg.getValue();
         const string f_test = testInFileArg.getValue();
-        const string d_mat = matParamInDirArg.getValue();
+        const string d_inmat = matParamInDirArg.getValue();
+        const string d_outmat = matParamOutDirArg.getValue();
         const string f_doctopic = doctopicOutFileArg.getValue();
         const string f_topicword = topicwordOutFileArg.getValue();
         const string f_topicword2 = topicwordOutFile2Arg.getValue();
@@ -617,7 +619,6 @@ int main( int argc,      // Number of strings in array argv
         const int SIMILAR_SIZE = similarSizeArg.getValue();
 
         const bool predictSimilar = predictSimilarSwitch.getValue();
-        const bool saveMatrix = saveMatrixSwitch.getValue();
         const bool debug = debugSwitch.getValue();
 
         // report parameters
@@ -626,7 +627,8 @@ int main( int argc,      // Number of strings in array argv
         cerr << "Input docword file: " << f_docword << endl;
         cerr << "Input vocab file: " << f_vocab << endl;
         cerr << "Input test docword file: " << f_test << endl;
-        cerr << "Input matrix dir: " << d_mat << endl;
+        cerr << "Input matrix param dir: " << d_inmat << endl;
+        cerr << "Output matrix param dir: " << d_outmat << endl;
         cerr << "Output doctopic file: " << f_doctopic << endl;
         cerr << "Output topicword file: " << f_topicword << endl;
         cerr << "Output topicword2 file: " << f_topicword2 << endl;
@@ -642,7 +644,6 @@ int main( int argc,      // Number of strings in array argv
         
         cerr << "Switches:\n";
         cerr << "predictSimilar: " << (predictSimilar ? "true" : "false") << endl;
-        cerr << "saveMatrix: " << (saveMatrix ? "true" : "false") << endl;
         cerr << "debug: " << (debug ? "true" : "false") << endl;
         cerr << endl;
 
@@ -676,26 +677,25 @@ int main( int argc,      // Number of strings in array argv
         // model option 2: run scvb0 training
         MatrixXd mat_N_phi, mat_N_theta, mat_posterior_prob_phi, mat_posterior_prob_theta;
 
-        //TODO: allow mat dir to be other than .
-        string fname_mat_N_phi = "mat_N_phi.txt";
-        string fname_mat_N_theta = "mat_N_theta.txt";
-        string fname_mat_posterior_prob_phi = "mat_posterior_prob_phi.txt";
-        string fname_mat_posterior_prob_theta = "mat_posterior_prob_theta.txt";
+        string f_in_mat_N_phi                = d_inmat + "/" + "mat_N_phi.txt";
+        string f_in_mat_N_theta              = d_inmat + "/" "mat_N_theta.txt";
+        string f_in_mat_posterior_prob_phi   = d_inmat + "/" + "mat_posterior_prob_phi.txt";
+        string f_in_mat_posterior_prob_theta = d_inmat + "/" + "mat_posterior_prob_theta.txt";
 
-        if (isFileExist(fname_mat_N_phi) && 
-            isFileExist(fname_mat_N_theta) && 
-            isFileExist(fname_mat_posterior_prob_phi) && 
-            isFileExist(fname_mat_posterior_prob_theta))
+        if (isFileExist(f_in_mat_N_phi) && 
+            isFileExist(f_in_mat_N_theta) && 
+            isFileExist(f_in_mat_posterior_prob_phi) && 
+            isFileExist(f_in_mat_posterior_prob_theta))
         {
             cerr << "Loading matrix params from files" << endl << endl;
-            read_mat(fname_mat_N_phi, mat_N_phi);
+            read_mat(f_in_mat_N_phi, mat_N_phi);
             W = mat_N_phi.rows();
             K = mat_N_phi.cols();
             //TODO: assert that K is same as provided by switch
-            read_mat(fname_mat_N_theta, mat_N_theta);
+            read_mat(f_in_mat_N_theta, mat_N_theta);
             D = mat_N_theta.rows();
-            read_mat(fname_mat_posterior_prob_phi, mat_posterior_prob_phi);
-            read_mat(fname_mat_posterior_prob_theta, mat_posterior_prob_theta);
+            read_mat(f_in_mat_posterior_prob_phi, mat_posterior_prob_phi);
+            read_mat(f_in_mat_posterior_prob_theta, mat_posterior_prob_theta);
         }
         else
         {
@@ -729,14 +729,26 @@ int main( int argc,      // Number of strings in array argv
         // output results to files
 
         // output matrix params s.t. we don't need to train lda again
-        if (saveMatrix)
+        if (d_outmat != "")
         {
-            cerr << "Save matrix params of lda training to files" << endl << endl;
+            cerr << "Saving matrix params of lda training to directory: " << d_outmat << endl;
+            //NOTE: modified from http://pubs.opengroup.org/onlinepubs/009695399/functions/mkdir.html
+            //create dir with read/write/search permissions for owner and group, and with read/search permissions  
+            //return 0 if created; -1 if cannot create or dir already exists
+            //TODO: check whether cannot create or dir already exists when returning -1
+            //TODO: check whether this works with absoluate path
+            int mkdirStat = mkdir(d_outmat.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+
+            string f_out_mat_N_phi                = d_outmat + "/" + "mat_N_phi.txt";
+            string f_out_mat_N_theta              = d_outmat + "/" "mat_N_theta.txt";
+            string f_out_mat_posterior_prob_phi   = d_outmat + "/" + "mat_posterior_prob_phi.txt";
+            string f_out_mat_posterior_prob_theta = d_outmat + "/" + "mat_posterior_prob_theta.txt";
+
             vector< pair<string, MatrixXd *> > outPairs;
-            outPairs.push_back( pair<string, MatrixXd *> ("mat_N_phi.txt", &mat_N_phi) );
-            outPairs.push_back( pair<string, MatrixXd *> ("mat_N_theta.txt", &mat_N_theta) );
-            outPairs.push_back( pair<string, MatrixXd *> ("mat_posterior_prob_phi.txt", &mat_posterior_prob_phi) );
-            outPairs.push_back( pair<string, MatrixXd *> ("mat_posterior_prob_theta.txt", &mat_posterior_prob_theta) );
+            outPairs.push_back( pair<string, MatrixXd *> (f_out_mat_N_phi, &mat_N_phi) );
+            outPairs.push_back( pair<string, MatrixXd *> (f_out_mat_N_theta, &mat_N_theta) );
+            outPairs.push_back( pair<string, MatrixXd *> (f_out_mat_posterior_prob_phi, &mat_posterior_prob_phi) );
+            outPairs.push_back( pair<string, MatrixXd *> (f_out_mat_posterior_prob_theta, &mat_posterior_prob_theta) );
 
             for (int p=0; p<outPairs.size(); p++)
             {
