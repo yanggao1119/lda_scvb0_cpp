@@ -20,6 +20,20 @@ using namespace TCLAP;
 
 
 //TODO: accept external N_theta/prob_theta and N_phi/prob_phi files?
+//TODO: streamed prediction
+
+
+// check file existence
+inline bool isFileExist (const std::string& name) {
+    ifstream f(name.c_str());
+    if (f.good()) {
+        f.close();
+        return true;
+    } else {
+        f.close();
+        return false;
+    }   
+}
 
 
 // pair comparer copied from shaofeng mo
@@ -70,9 +84,51 @@ Document* get_str2doc(string str)
 }
 
 
+void read_mat(const string & filename, 
+                MatrixXd & mat)
+{
+    cerr << "Start reading mat file " << filename << endl;
+    clock_t t_b4_read = clock();
+
+    // get dimension from matrix file, col element delimited by space
+    ifstream f(filename.c_str());
+    string line;
+    int rowDim=0, colDim=0;
+    for(; getline(f, line); rowDim++) 
+    {
+        if (rowDim==0)
+        {
+            std::istringstream iss(line);
+            string tok;
+            while ( getline(iss, tok, ' ') ) colDim++;
+        }
+    }
+
+    // populate matrix
+    ifstream ff(filename.c_str());
+    mat = MatrixXd::Constant(rowDim, colDim, 0);
+    //TODO: why this initialization does not work?
+    //mat(rowDim, colDim);
+    for (int r=0; getline(ff, line); r++)
+    {
+        std::istringstream iss2(line);
+        int c=0;
+        string tok;
+        while ( getline( iss2, tok, ' ' ) ) {
+            //TODO: atof lost precision, should convert to double
+            mat(r, c) = atof(tok.c_str());
+            c++;
+        }
+    }
+
+    cerr << "dimension: " << rowDim << " by " << colDim << endl;
+    cerr << "done reading mat file, time spent: " << float(clock() - t_b4_read)/CLOCKS_PER_SEC << " secs" << endl << endl;
+}
+
+
 void read_vocab(string file, vector<string> & vocabs) 
 {
-    cerr << "Start reading vocab file" << endl;
+    cerr << "Start reading vocab file " << file << endl;
     clock_t t_b4_read = clock();
 
     ifstream ifs(file.c_str());
@@ -86,7 +142,7 @@ void read_vocab(string file, vector<string> & vocabs)
 
 Document** read_docword(string file, int & D, int & W, int & C) 
 {
-    cerr << "Start reading docword file" << endl;
+    cerr << "Start reading docword file " << file << endl;
     clock_t t_b4_read = clock();
 
     Document** documents;
@@ -329,7 +385,6 @@ void scvb0(Document ** documents,
           MatrixXd & mat_posterior_prob_phi,
           MatrixXd & mat_posterior_prob_theta)
 {
-    bool debug = false;
     cerr << "Start scvb0" << endl;
     clock_t t_b4_scvb0 = clock();
 
@@ -448,6 +503,10 @@ int main( int argc,      // Number of strings in array argv
         ValueArg<string> testInFileArg("t","testfile","<CURRENT TESTING IS CHEATING!> Path to the test file in the same format as docword file for training, sharing the same vocab file with training. Words that don't show up in the vocab file should have already been filtered out", false, "","string");
         cmd.add( testInFileArg );
 
+        //TODO;
+        ValueArg<string> matParamInDirArg("","matdir", "directory of previously trained model to be loaded, must contain four files: {mat_N_phi, mat_N_theta, mat_posterior_prob_phi, mat_posterior_prob_theta}.txt", false, ".","string");
+        cmd.add( matParamInDirArg );
+
         ValueArg<string> doctopicOutFileArg("","doctopicfile","Output result of scvb0 training, where each line represents the distribution of all topics for a document, separated by commas", false, "","string");
         cmd.add( doctopicOutFileArg );
 
@@ -514,6 +573,9 @@ int main( int argc,      // Number of strings in array argv
         SwitchArg predictSimilarSwitch("p","predict","optional prediction mode, i.e., after training topic model, it accepts a one-line compact docword representation from STDIN and outputs to STDOUT the id of the most similar document (1-based) from the training set", false);
         cmd.add( predictSimilarSwitch );
 
+        SwitchArg saveMatrixSwitch("","savematrix","write trained matrix params to files: {mat_N_phi, mat_N_theta, mat_posterior_prob_phi, mat_posterior_prob_theta}.txt", false);
+        cmd.add( saveMatrixSwitch );
+
         //TODO: function to specify random seed explicitly
         SwitchArg debugSwitch("","debug","running debug mode, specifying random seed and sanity check to see if each training doc predicts itself as the most similar doc", false);
         cmd.add( debugSwitch );
@@ -524,12 +586,13 @@ int main( int argc,      // Number of strings in array argv
         const string f_docword = docwordInFileArg.getValue();
         const string f_vocab = vocabInFileArg.getValue();
         const string f_test = testInFileArg.getValue();
+        const string d_mat = matParamInDirArg.getValue();
         const string f_doctopic = doctopicOutFileArg.getValue();
         const string f_topicword = topicwordOutFileArg.getValue();
         const string f_topicword2 = topicwordOutFile2Arg.getValue();
 
         const int SWEEP = sweepArg.getValue();
-        const int K = numTopicArg.getValue();
+        int K = numTopicArg.getValue();
 
         const double ALPHA=alphaArg.getValue();
         const double ETA=etaArg.getValue();
@@ -554,14 +617,16 @@ int main( int argc,      // Number of strings in array argv
         const int SIMILAR_SIZE = similarSizeArg.getValue();
 
         const bool predictSimilar = predictSimilarSwitch.getValue();
+        const bool saveMatrix = saveMatrixSwitch.getValue();
         const bool debug = debugSwitch.getValue();
 
         // report parameters
-        cerr << "\nParameters:\n";
+        cerr << "Parameters:\n";
 
         cerr << "Input docword file: " << f_docword << endl;
         cerr << "Input vocab file: " << f_vocab << endl;
         cerr << "Input test docword file: " << f_test << endl;
+        cerr << "Input matrix dir: " << d_mat << endl;
         cerr << "Output doctopic file: " << f_doctopic << endl;
         cerr << "Output topicword file: " << f_topicword << endl;
         cerr << "Output topicword2 file: " << f_topicword2 << endl;
@@ -574,6 +639,11 @@ int main( int argc,      // Number of strings in array argv
         cerr << "RANDSEED_phi: " << RANDSEED_phi << "\tRANDSEED_theta: " << RANDSEED_theta << endl;
         cerr << "TIME_LIMIT: " << TIME_LIMIT << "\tREPORT_PERPLEXITY_ITER: " << REPORT_PERPLEXITY_ITER << endl;
         cerr << "SIMILAR_METRIC: " << SIMILAR_METRIC << "\tSIMILAR_SIZE: " << SIMILAR_SIZE << endl;
+        
+        cerr << "Switches:\n";
+        cerr << "predictSimilar: " << (predictSimilar ? "true" : "false") << endl;
+        cerr << "saveMatrix: " << (saveMatrix ? "true" : "false") << endl;
+        cerr << "debug: " << (debug ? "true" : "false") << endl;
         cerr << endl;
 
         // read vocab file
@@ -582,7 +652,7 @@ int main( int argc,      // Number of strings in array argv
         //for (int i=0; i<vocabs.size(); i++) cerr << vocabs[i] << endl;
         //cerr << "total vocab " << vocabs.size() << endl;
 
-        // read docword file and obtain D, W, C
+        // read docword file
         int D=0, W=0, C=0;
         //NOTE: error if we pass this pointer as function arg
         //Document** documents = NULL;
@@ -602,34 +672,86 @@ int main( int argc,      // Number of strings in array argv
         }
         cerr << "# of empty doc: " << empty_doc_count << endl << endl;
 
-        // scvb0
+        // model option 1: directly load matrix params from files
+        // model option 2: run scvb0 training
         MatrixXd mat_N_phi, mat_N_theta, mat_posterior_prob_phi, mat_posterior_prob_theta;
-        scvb0(documents, 
-              D,
-              W,
-              C,
-              K,
-              SWEEP,
-              ALPHA,
-              ETA,
-              M,
-              BURNIN_PER_DOC,
-              S,
-              TAO,
-              KAPPA,
-              S2,
-              TAO2,
-              KAPPA2,
-              RANDSEED_phi,
-              RANDSEED_theta,
-              TIME_LIMIT,
-              REPORT_PERPLEXITY_ITER,
-              mat_N_phi,
-              mat_N_theta,
-              mat_posterior_prob_phi,
-              mat_posterior_prob_theta);
+
+        //TODO: allow mat dir to be other than .
+        string fname_mat_N_phi = "mat_N_phi.txt";
+        string fname_mat_N_theta = "mat_N_theta.txt";
+        string fname_mat_posterior_prob_phi = "mat_posterior_prob_phi.txt";
+        string fname_mat_posterior_prob_theta = "mat_posterior_prob_theta.txt";
+
+        if (isFileExist(fname_mat_N_phi) && 
+            isFileExist(fname_mat_N_theta) && 
+            isFileExist(fname_mat_posterior_prob_phi) && 
+            isFileExist(fname_mat_posterior_prob_theta))
+        {
+            cerr << "Loading matrix params from files" << endl << endl;
+            read_mat(fname_mat_N_phi, mat_N_phi);
+            W = mat_N_phi.rows();
+            K = mat_N_phi.cols();
+            //TODO: assert that K is same as provided by switch
+            read_mat(fname_mat_N_theta, mat_N_theta);
+            D = mat_N_theta.rows();
+            read_mat(fname_mat_posterior_prob_phi, mat_posterior_prob_phi);
+            read_mat(fname_mat_posterior_prob_theta, mat_posterior_prob_theta);
+        }
+        else
+        {
+            // scvb0
+            scvb0(documents, 
+                  D,
+                  W,
+                  C,
+                  K,
+                  SWEEP,
+                  ALPHA,
+                  ETA,
+                  M,
+                  BURNIN_PER_DOC,
+                  S,
+                  TAO,
+                  KAPPA,
+                  S2,
+                  TAO2,
+                  KAPPA2,
+                  RANDSEED_phi,
+                  RANDSEED_theta,
+                  TIME_LIMIT,
+                  REPORT_PERPLEXITY_ITER,
+                  mat_N_phi,
+                  mat_N_theta,
+                  mat_posterior_prob_phi,
+                  mat_posterior_prob_theta);
+        }
 
         // output results to files
+
+        // output matrix params s.t. we don't need to train lda again
+        if (saveMatrix)
+        {
+            cerr << "Save matrix params of lda training to files" << endl << endl;
+            vector< pair<string, MatrixXd *> > outPairs;
+            outPairs.push_back( pair<string, MatrixXd *> ("mat_N_phi.txt", &mat_N_phi) );
+            outPairs.push_back( pair<string, MatrixXd *> ("mat_N_theta.txt", &mat_N_theta) );
+            outPairs.push_back( pair<string, MatrixXd *> ("mat_posterior_prob_phi.txt", &mat_posterior_prob_phi) );
+            outPairs.push_back( pair<string, MatrixXd *> ("mat_posterior_prob_theta.txt", &mat_posterior_prob_theta) );
+
+            for (int p=0; p<outPairs.size(); p++)
+            {
+                cerr << "Writing to " << outPairs[p].first << endl;
+                clock_t t_b4_write = clock();
+                IOFormat matrixFormat(FullPrecision, DontAlignCols, " ", "\n", "", "", "", "");
+                ofstream ofs;
+                ofs.open(outPairs[p].first.c_str());
+                ofs << outPairs[p].second->format(matrixFormat) << endl;
+                ofs.close();
+                cerr << "done, time spent: " << float(clock() - t_b4_write)/CLOCKS_PER_SEC << " secs" << endl << endl;
+            }
+        }
+ 
+        // output doc-topic, topic-word for human consumption
         if (f_doctopic != "")
         {
             cerr << "Writing to doctopic file: " << f_doctopic << endl;
