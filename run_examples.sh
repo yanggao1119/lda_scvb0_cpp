@@ -20,3 +20,9 @@ export OMP_NUM_THREADS=1; ./lda_scvb0 -d data_uci/docword.nips.txt -v data_uci/v
 
 # 5. as 3., yet using files at both ends of the pipe, i.e., query_input >> STDIN and STDOUT >> query_out
 #export OMP_NUM_THREADS=4; cat data_uci/docword.nips.txt | python get_docword2oneline.py | ./lda_scvb0 -p -d data_uci/docword.nips.txt -v data_uci/vocab.nips.txt -s 10 -k 100 --doctopicfile exp/doctopic.txt --topicwordfile exp/topics.txt --topicwordfile2 exp/topics.vocab.txt > exp/query.out 
+
+# 6. as 5., yet using 1 thread
+#export OMP_NUM_THREADS=1; cat data_uci/docword.nips.txt | python get_docword2oneline.py | ./lda_scvb0 -p -d data_uci/docword.nips.txt -v data_uci/vocab.nips.txt -s 10 -k 100 --doctopicfile exp/doctopic.txt --topicwordfile exp/topics.txt --topicwordfile2 exp/topics.vocab.txt > exp/query.out 
+
+# 7. as 6., yet using arg switch to provide test file, this is robust to blank line
+#export OMP_NUM_THREADS=1; ./lda_scvb0 -p -d data_uci/docword.nips.txt -t data_uci/docword.nips.txt -v data_uci/vocab.nips.txt -s 10 -k 100 --doctopicfile exp/doctopic.txt --topicwordfile exp/topics.txt --topicwordfile2 exp/topics.vocab.txt > exp/query.out2 

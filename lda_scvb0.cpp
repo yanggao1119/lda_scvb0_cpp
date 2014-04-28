@@ -23,6 +23,8 @@ using namespace TCLAP;
 
 
 //TODO: streamed prediction
+//TODO: implement kl divergence
+//TODO: update README.md
 
 
 // check file existence
@@ -117,7 +119,7 @@ void read_mat(const string & filename,
         int c=0;
         string tok;
         while ( getline( iss2, tok, ' ' ) ) {
-            //TODO: atof lost precision, should convert to double
+            //TODO: atof may lost precision, if so need to convert to double
             mat(r, c) = atof(tok.c_str());
             c++;
         }
@@ -495,15 +497,15 @@ int main( int argc,      // Number of strings in array argv
     //parse command line args; if succeed, perform scvb0 training (and prediction with -p switch is on)
     try {  
         CmdLine cmd("Command description message", ' ', "0.2");
-
+        //TODO: change name to docwordTrainInFileArg
         ValueArg<string> docwordInFileArg("d","docwordfile","Path to docword file for training topic model, in uci sparse bag-of-words format, where each line is a (doc id, word id, word count) triple delimited by space. Both doc id and word id are 1-based. Word id refers to the corresponding line in the vocab file", true, "","string");
         cmd.add( docwordInFileArg );
 
         ValueArg<string> vocabInFileArg("v","vocabfile","Path to vocab file associated with docword file for training topic model, in uci sparse bag-of-words format", true, "","string");
         cmd.add( vocabInFileArg );
 
-        ValueArg<string> testInFileArg("t","testfile","<CURRENT TESTING IS CHEATING!> Path to the test file in the same format as docword file for training, sharing the same vocab file with training. Words that don't show up in the vocab file should have already been filtered out", false, "","string");
-        cmd.add( testInFileArg );
+        ValueArg<string> docwordTestInFileArg("t","docwordtestfile","Path to docword file for similarity testing, in uci sparse bag-of-words format. Output similarity prediction for each file to STDOUT. Note that test file can also be piped from STDIN in a compact oneline format, yet this arg switch is preferred to STDIN when there are empty lines", false, "","string");
+        cmd.add( docwordTestInFileArg );
 
         ValueArg<string> matParamInDirArg("","inmatdir", "directory of previously trained model to be loaded, which contain four files: {mat_N_phi, mat_N_theta, mat_posterior_prob_phi, mat_posterior_prob_theta}.txt", false, "","string");
         cmd.add( matParamInDirArg );
@@ -586,7 +588,7 @@ int main( int argc,      // Number of strings in array argv
         // Get the value parsed by each arg. 
         const string f_docword = docwordInFileArg.getValue();
         const string f_vocab = vocabInFileArg.getValue();
-        const string f_test = testInFileArg.getValue();
+        const string f_docword_test = docwordTestInFileArg.getValue();
         const string d_inmat = matParamInDirArg.getValue();
         const string d_outmat = matParamOutDirArg.getValue();
         const string f_doctopic = doctopicOutFileArg.getValue();
@@ -624,9 +626,9 @@ int main( int argc,      // Number of strings in array argv
         // report parameters
         cerr << "Parameters:\n";
 
-        cerr << "Input docword file: " << f_docword << endl;
-        cerr << "Input vocab file: " << f_vocab << endl;
-        cerr << "Input test docword file: " << f_test << endl;
+        cerr << "Input train docword file: " << f_docword << endl;
+        cerr << "Input train vocab file: " << f_vocab << endl;
+        cerr << "Input test docword file: " << f_docword_test << endl;
         cerr << "Input matrix param dir: " << d_inmat << endl;
         cerr << "Output matrix param dir: " << d_outmat << endl;
         cerr << "Output doctopic file: " << f_doctopic << endl;
@@ -842,13 +844,13 @@ int main( int argc,      // Number of strings in array argv
         //TODO: jimmy foulds says this test is cheating, because we optimize theta for test doc first. To not cheat, there are two ways:
         //1) split each test doc into two parts, making sure words are disjoint; then estimate theta on one part and calculate perplexity on the other
         //2) left-to-right as Wallach et al., evaluation methods for topic models
-        if (f_test != "")
+/*        if (f_docword_test != "")
         {
             cerr << "Compute perplexity of test corpus" << endl;
             clock_t t_b4_test = clock();
 
             int D_test=0, W_test=0, C_test=0;
-            Document** documents_test = read_docword(f_test, D_test, W_test, C_test); 
+            Document** documents_test = read_docword(f_docword_test, D_test, W_test, C_test); 
  
             MatrixXd mat_N_theta_test = MatrixXd::Constant(D_test, K, 0.0);
             for (int j=0; j<D_test; j++)
@@ -861,18 +863,52 @@ int main( int argc,      // Number of strings in array argv
             cerr << "test perplexity: " << perplexity_test << endl; 
             cerr << "done, time spent: " << float(clock() - t_b4_test)/CLOCKS_PER_SEC << " secs" << endl << endl;
         }
+*/
+        // mode 2.1: similarity testing for file from arg switch
+        if (predictSimilar && f_docword_test != "")
+        {
+            cerr << "Start similarity prediction for test corpus: " << f_docword_test << endl;
 
-        // mode 2: similarity testing
+            int D_test=0, W_test=0, C_test=0;
+            Document** documents_test = read_docword(f_docword_test, D_test, W_test, C_test); 
+
+            for (int tj=0; tj<D_test; tj++)
+            {
+                Document * testdoc = documents_test[tj];
+                clock_t t_b4_test = clock();
+
+                // get paired (doc_ind, score) vector with similarity measure
+                vector< pair<int, double> > pair_docind_score;
+                if (SIMILAR_METRIC == "l2")
+                    get_similar_by_l2_distance(pair_docind_score, testdoc, D, W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_posterior_prob_theta);
+                else if (SIMILAR_METRIC == "condprob")
+                    get_similar_by_logcondprob(pair_docind_score, testdoc, mat_posterior_prob_phi, mat_posterior_prob_theta, D);
+    
+                // output to STDOUT in one line
+                int numTopSimilar = (pair_docind_score.size() < SIMILAR_SIZE ? pair_docind_score.size() : SIMILAR_SIZE);
+                for (int p=0; p<numTopSimilar; p++)
+                {
+                    cout << pair_docind_score[p].first+1 << ":" << pair_docind_score[p].second;
+                    if (p < numTopSimilar-1) cout << " ";
+                }
+                cout << endl;
+                cerr << "testdoc: " << tj+1 << " time spent: " << float(clock() - t_b4_test)/CLOCKS_PER_SEC << " secs" << endl; 
+            }
+        }
+
+        // mode 2.2: similarity testing for file from STDIN, note: cannot handle blank lines!
         // input from STDIN, output to STDOUT, convert internal 0-based doc ind to 1-based
-        if (predictSimilar && ! debug)
+        else if (predictSimilar && ! debug)
         {
             cerr << "\nReading input from STDIN" << endl;
+            long counter = 0;
             while (cin) 
             {
                 string testdoc_line;
                 getline(cin, testdoc_line);
                 if (!cin.eof())
                 {
+                    counter ++;
                     clock_t t_b4_test = clock();
                     Document * testdoc = get_str2doc(testdoc_line);
     
@@ -891,14 +927,13 @@ int main( int argc,      // Number of strings in array argv
                         if (p < numTopSimilar-1) cout << " ";
                     }
                     cout << endl;
-                    cerr << "time spent: " << float(clock() - t_b4_test)/CLOCKS_PER_SEC << " secs" << endl; 
-                    cout << endl;
+                    cerr << "testdoc: " << counter << " time spent: " << float(clock() - t_b4_test)/CLOCKS_PER_SEC << " secs" << endl; 
                 }
             }
         }
 
         // mode 3: debug training and similarity testing: sanity check to see if each training doc predicts itself as the most similar doc
-        if ( predictSimilar && debug )
+        else if ( predictSimilar && debug )
         {
             cerr << "\nDebugging training and similarity test" << endl;
             for (int j=0; j<D; j++)
