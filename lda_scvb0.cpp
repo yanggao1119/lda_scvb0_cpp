@@ -266,7 +266,13 @@ MatrixXd burnin_doc_j(const Document * doc_j,
     {
         C_j += doc_j->word_count[i];
     }
-    
+
+    // empty doc, return w/o burnin
+    if (C_j == 0)   
+    {
+        return mat_N_theta_j;
+    }
+ 
     // create randomly shuffled indices, helps marginally
     vector<int> rand_indices;
     for (int p = 0; p < doc_j->word_ind.size(); ++p)
