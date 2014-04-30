@@ -23,7 +23,6 @@ using namespace TCLAP;
 
 
 //TODO: streamed prediction
-//TODO: implement kl divergence
 //TODO: update README.md
 
 
@@ -312,6 +311,44 @@ MatrixXd burnin_doc_j(const Document * doc_j,
 }
 
 
+void get_similar_by_skl(vector< pair<int, double> > & pair_docind_score,
+                                const Document * testdoc, 
+                                const int & D,
+                                const int & W,
+                                const int & K,
+                                const double & ALPHA,
+                                const double & ETA,
+                                const int & BURNIN_PER_DOC,
+                                const double & S2,
+                                const double & TAO2,
+                                const double & KAPPA2,
+                                const MatrixXd & mat_N_phi,
+                                const MatrixXd & mat_posterior_prob_theta)
+{
+    // given testdoc, rank training doc by symmetric kl divergence: smaller divergence, higher rank
+    MatrixXd mat_N_theta_test = ((MatrixXd::Random(1, K)*0.5).array() + 1).matrix();
+    mat_N_theta_test = burnin_doc_j(testdoc, W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_N_theta_test);
+    MatrixXd mat_posterior_prob_theta_test = MatrixXd::Constant(1, K, 0);
+    get_mat_posterior_prob_theta(mat_N_theta_test, ALPHA, mat_posterior_prob_theta_test);
+  
+    for (int j=0; j<D; j++)
+    {
+        double dist = 0;
+        for (int c=0; c<mat_posterior_prob_theta_test.cols(); c++)
+        {
+            dist += mat_posterior_prob_theta_test(0, c) * log2( mat_posterior_prob_theta_test(0, c) / mat_posterior_prob_theta(j, c) ); 
+        }
+        for (int c=0; c<mat_posterior_prob_theta.cols(); c++)
+        {
+            dist += mat_posterior_prob_theta(j, c) * log2( mat_posterior_prob_theta(j, c) / mat_posterior_prob_theta_test(0, c) ); 
+        }
+        dist /= 2;
+        pair_docind_score.push_back( pair<int, double> (j, dist) );
+    }
+    sort( pair_docind_score.begin() , pair_docind_score.end() , pairCmpAscend );
+}
+
+
 void get_similar_by_l2_distance(vector< pair<int, double> > & pair_docind_score,
                                 const Document * testdoc, 
                                 const int & D,
@@ -576,7 +613,7 @@ int main( int argc,      // Number of strings in array argv
         ValueArg<int> reportPerpIterArg("","reportperp","Report training perplexity for how many document iterations", false, 10000,"int");
         cmd.add( reportPerpIterArg );
 
-        ValueArg<string> similarMetricArg("","similarmetric","Method to measure similarity between the query and training docs, default to L2 distance of topic distribution. Another similarity measure, P(query_doc|training_doc) requires more computation and can be turned on by specifying condprob as value", false, "l2","string");
+        ValueArg<string> similarMetricArg("","similarmetric","Method to measure similarity between the query and training docs, default to L2 distance of topic distribution. Another similarity measure, P(query_doc|training_doc) requires more computation and can be turned on by specifying condprob as value, options: l2 for l2 distance over topic distribution; skl for symmetric kl divergence over topic distribution; condprob for p(query|doc)", false, "l2","string");
         cmd.add( similarMetricArg );
 
         ValueArg<int> similarSizeArg("","similarsize","for similarity test, how many top similar docs to report", false, 50,"int");
@@ -889,7 +926,8 @@ int main( int argc,      // Number of strings in array argv
                     get_similar_by_l2_distance(pair_docind_score, testdoc, D, W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_posterior_prob_theta);
                 else if (SIMILAR_METRIC == "condprob")
                     get_similar_by_logcondprob(pair_docind_score, testdoc, mat_posterior_prob_phi, mat_posterior_prob_theta, D);
-    
+                else if (SIMILAR_METRIC == "skl")
+                    get_similar_by_skl(pair_docind_score, testdoc, D, W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_posterior_prob_theta);
                 // output to STDOUT in one line
                 int numTopSimilar = (pair_docind_score.size() < SIMILAR_SIZE ? pair_docind_score.size() : SIMILAR_SIZE);
                 for (int p=0; p<numTopSimilar; p++)
@@ -924,6 +962,8 @@ int main( int argc,      // Number of strings in array argv
                         get_similar_by_l2_distance(pair_docind_score, testdoc, D, W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_posterior_prob_theta);
                     else if (SIMILAR_METRIC == "condprob")
                         get_similar_by_logcondprob(pair_docind_score, testdoc, mat_posterior_prob_phi, mat_posterior_prob_theta, D);
+                    else if (SIMILAR_METRIC == "skl")
+                        get_similar_by_skl(pair_docind_score, testdoc, D, W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_posterior_prob_theta);
     
                     // output to STDOUT in one line
                     int numTopSimilar = (pair_docind_score.size() < SIMILAR_SIZE ? pair_docind_score.size() : SIMILAR_SIZE);
