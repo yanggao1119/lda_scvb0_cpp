@@ -413,6 +413,7 @@ void scvb0(Document ** documents,
           const int & C,
           const int & K,
           const int & SWEEP,
+          const double & STOP_CHANGE,
           const double & ALPHA,
           const double & ETA,
           const int & M,
@@ -448,6 +449,7 @@ void scvb0(Document ** documents,
 
     double minibatches_per_corpus = (1.0 * C) / M;
     unsigned long number_minibatches = ceil(float(D)/M);
+    double prev_perplexity = 0.0;
 
     clock_t t_b4_all_sweep = clock();
     for (int s=0; s<SWEEP; s++)
@@ -518,11 +520,24 @@ void scvb0(Document ** documents,
        
         clock_t t_after_this_sweep = clock(); 
         cerr << "done sweep " << s << ", time spent: " << float(t_after_this_sweep - t_b4_this_sweep)/CLOCKS_PER_SEC << " secs, perplexity: " << perplexity << endl;
+
+        // check convergence
+        if (s > 0)
+        {
+            double relative_pp_change = (prev_perplexity - perplexity) / prev_perplexity;
+            if (relative_pp_change <= STOP_CHANGE)
+            {
+                cerr << "relative perplexity change <= " << STOP_CHANGE << " , stop scvb0" << endl;
+                break;            
+            }
+        }
+        prev_perplexity = perplexity;        
+
         // check timeout!
         if ( float(t_after_this_sweep - t_b4_scvb0)/CLOCKS_PER_SEC > TIME_LIMIT) 
         {
             cerr << "reaching time limit " << TIME_LIMIT << " secs, stop scvb0" << endl;
-            return;
+            break;
         }
 
     } // finish sweep 
@@ -567,6 +582,9 @@ int main( int argc,      // Number of strings in array argv
 
         ValueArg<int> sweepArg("s","sweep","Number of sweeps over docword file", false, 10,"int");
         cmd.add( sweepArg );
+
+        ValueArg<double> stopChangeArg("","stopchange","Optional convergence criterion: stop scvb0 training if the relative change of perplexity is below this number. This is calculated at the end of a sweep, as (prev_pp - curr_pp)/prev_pp", false, 0.0005,"double");
+        cmd.add( stopChangeArg );
 
         ValueArg<int> numTopicArg("k","ktopics","Number of topics for LDA model", false, 100,"int");
         cmd.add( numTopicArg );
@@ -639,6 +657,7 @@ int main( int argc,      // Number of strings in array argv
         const string f_topicword2 = topicwordOutFile2Arg.getValue();
 
         const int SWEEP = sweepArg.getValue();
+        const double STOP_CHANGE = stopChangeArg.getValue();
         int K = numTopicArg.getValue();
 
         const double ALPHA=alphaArg.getValue();
@@ -678,7 +697,7 @@ int main( int argc,      // Number of strings in array argv
         cerr << "Output topicword file: " << f_topicword << endl;
         cerr << "Output topicword2 file: " << f_topicword2 << endl;
 
-        cerr << "K: " << K << "\tSWEEP: " << SWEEP << endl;
+        cerr << "K: " << K << "\tSWEEP: " << SWEEP << "\tSTOP_CHANGE: " << STOP_CHANGE << endl;
         cerr << "ALPHA: " << ALPHA << "\tETA: " << ETA << endl;
         cerr << "M: " << M << "\tBURNIN_PER_DOC: " << BURNIN_PER_DOC << endl;
         cerr << "S: " << S << "\tTAO: " << TAO << "\tKAPPA: " << KAPPA << endl; 	
@@ -751,6 +770,7 @@ int main( int argc,      // Number of strings in array argv
                   C,
                   K,
                   SWEEP,
+                  STOP_CHANGE,
                   ALPHA,
                   ETA,
                   M,
