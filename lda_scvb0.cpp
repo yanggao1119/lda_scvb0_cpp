@@ -22,10 +22,6 @@ using namespace Eigen;
 using namespace TCLAP;
 
 
-//TODO: streamed prediction
-//TODO: update README.md
-
-
 // check file existence
 inline bool isFileExist (const std::string& name) {
     ifstream f(name.c_str());
@@ -349,6 +345,69 @@ void get_similar_by_skl(vector< pair<int, double> > & pair_docind_score,
 }
 
 
+void update_streaming_naive(
+                                const Document * streamdoc, 
+                                const int & D,
+                                const int & W,
+                                const int & C,
+                                const int & K,
+                                const double & ALPHA,
+                                const double & ETA,
+                                const int & M,
+                                const int & BURNIN_PER_DOC,
+                                const double & S,
+                                const double & TAO,
+                                const double & KAPPA,
+                                const double & S2,
+                                const double & TAO2,
+                                const double & KAPPA2,
+                                const MatrixXd & mat_N_theta,
+                                MatrixXd & mat_N_phi,
+                                MatrixXd & mat_N_phi_hat,
+                                MatrixXd & mat_N_Z_hat,
+                                MatrixXd & mat_N_Z, 
+                                unsigned long & doc_iter)
+{
+    doc_iter ++;
+
+    // naive streaming udpate: only mat_N_phi and mat_posterior_prob_phi
+    MatrixXd mat_N_theta_test = ((MatrixXd::Random(1, K)*0.5).array() + 1).matrix();
+    mat_N_theta_test = burnin_doc_j(streamdoc, W, K, ALPHA, ETA, BURNIN_PER_DOC, S2, TAO2, KAPPA2, mat_N_phi, mat_N_theta_test);
+ 
+    double minibatches_per_corpus = (1.0 * C) / M; 
+                
+    // final update for doc
+    for (int i=0; i<streamdoc->word_ind.size(); i++)
+    {
+        int w_i = streamdoc->word_ind[i];
+        int w_c = streamdoc->word_count[i];
+        // eqn 5
+        MatrixXd mat_gamma_i_j = (((mat_N_phi.row(w_i).array() + ETA)*(mat_N_theta_test.row(0).array() + ALPHA))/( mat_N_Z.array() + ETA*W)).matrix();
+        mat_gamma_i_j /= mat_gamma_i_j.sum(); 
+        
+        // update hat            
+        mat_N_phi_hat.row(w_i) += minibatches_per_corpus*w_c*mat_gamma_i_j;
+        mat_N_Z_hat += minibatches_per_corpus*w_c*mat_gamma_i_j;
+    }
+                 
+    if (doc_iter % M == 0)
+    {
+        // batch update
+        double rho_phi = S/pow(TAO+doc_iter, KAPPA);
+        // eqn 7
+        mat_N_phi = (1-rho_phi)*mat_N_phi + rho_phi*mat_N_phi_hat;
+        // eqn 8
+        mat_N_Z = (1-rho_phi)*mat_N_Z + rho_phi*mat_N_Z_hat;
+
+        mat_N_phi_hat *= 0;
+        mat_N_Z_hat *= 0;
+        mat_N_Z = mat_N_phi.colwise().sum();
+
+    } // finish minibatch update
+
+}
+
+
 void get_similar_by_l2_distance(vector< pair<int, double> > & pair_docind_score,
                                 const Document * testdoc, 
                                 const int & D,
@@ -431,7 +490,8 @@ void scvb0(Document ** documents,
           MatrixXd & mat_N_phi,
           MatrixXd & mat_N_theta,
           MatrixXd & mat_posterior_prob_phi,
-          MatrixXd & mat_posterior_prob_theta)
+          MatrixXd & mat_posterior_prob_theta,
+          unsigned long & doc_iter)
 {
     cerr << "Start scvb0" << endl;
     clock_t t_b4_scvb0 = clock();
@@ -464,9 +524,8 @@ void scvb0(Document ** documents,
 
             int minibatch_start = m*M;
             int minibatch_end = ( (m+1)*M > D ? D : (m+1)*M );
-            //NOTE: document iteration accumulates from sweeps
-            unsigned long doc_iter;
 
+            //NOTE: document iteration accumulates from sweeps
             //cerr << "batch " << m << " start " << minibatch_start << " end " <<  minibatch_end << endl;
             for (int j=minibatch_start; j<minibatch_end; j++)
             {
@@ -510,6 +569,7 @@ void scvb0(Document ** documents,
             // eqn 7
             mat_N_phi = (1-rho_phi)*mat_N_phi + rho_phi*mat_N_phi_hat;
             // eqn 8
+            //TODO: this update seems useless, check and remove?
             mat_N_Z = (1-rho_phi)*mat_N_Z + rho_phi*mat_N_Z_hat;
         } // finish minibatch update
         
@@ -640,6 +700,10 @@ int main( int argc,      // Number of strings in array argv
         SwitchArg predictSimilarSwitch("p","predict","optional prediction mode, i.e., after training topic model, it accepts a one-line compact docword representation from STDIN and outputs to STDOUT the id of the most similar document (1-based) from the training set", false);
         cmd.add( predictSimilarSwitch );
 
+        //TODO: advanced streaming that update vocab also
+        SwitchArg naiveStreamingSwitch("","naivestreaming","running a naive streaming mode, i.e., updating the phi matrix as we go through each testdoc", false);
+        cmd.add( naiveStreamingSwitch );
+
         //TODO: function to specify random seed explicitly
         SwitchArg debugSwitch("","debug","running debug mode, specifying random seed and sanity check to see if each training doc predicts itself as the most similar doc", false);
         cmd.add( debugSwitch );
@@ -683,6 +747,7 @@ int main( int argc,      // Number of strings in array argv
         const int SIMILAR_SIZE = similarSizeArg.getValue();
 
         const bool predictSimilar = predictSimilarSwitch.getValue();
+        const bool naiveStreaming = naiveStreamingSwitch.getValue();
         const bool debug = debugSwitch.getValue();
 
         // report parameters
@@ -708,6 +773,7 @@ int main( int argc,      // Number of strings in array argv
         
         cerr << "Switches:\n";
         cerr << "predictSimilar: " << (predictSimilar ? "true" : "false") << endl;
+        cerr << "naiveStreaming: " << (naiveStreaming ? "true" : "false") << endl;
         cerr << "debug: " << (debug ? "true" : "false") << endl;
         cerr << endl;
 
@@ -746,6 +812,8 @@ int main( int argc,      // Number of strings in array argv
         string f_in_mat_posterior_prob_phi   = d_inmat + "/" + "mat_posterior_prob_phi.txt";
         string f_in_mat_posterior_prob_theta = d_inmat + "/" + "mat_posterior_prob_theta.txt";
 
+        unsigned long doc_iter = 0;
+
         if (isFileExist(f_in_mat_N_phi) && 
             isFileExist(f_in_mat_N_theta) && 
             isFileExist(f_in_mat_posterior_prob_phi) && 
@@ -760,6 +828,8 @@ int main( int argc,      // Number of strings in array argv
             D = mat_N_theta.rows();
             read_mat(f_in_mat_posterior_prob_phi, mat_posterior_prob_phi);
             read_mat(f_in_mat_posterior_prob_theta, mat_posterior_prob_theta);
+            //TODO: this is actually a cheap bug, need to export sweeps of prev run
+            doc_iter = D;
         }
         else
         {
@@ -788,7 +858,55 @@ int main( int argc,      // Number of strings in array argv
                   mat_N_phi,
                   mat_N_theta,
                   mat_posterior_prob_phi,
-                  mat_posterior_prob_theta);
+                  mat_posterior_prob_theta,
+                  doc_iter);
+        }
+
+        // streaming mode
+        if (naiveStreaming)
+        {
+            MatrixXd mat_N_phi_hat = MatrixXd::Constant(W, K, 0);
+            MatrixXd mat_N_Z_hat = MatrixXd::Constant(1, K, 0);
+            MatrixXd mat_N_Z = mat_N_phi.colwise().sum();
+
+            cerr << "\nReading streaming doc from STDIN" << endl;
+            unsigned long counter = 0;
+            while (cin) 
+            {
+                string streamdoc_line;
+                getline(cin, streamdoc_line);
+                if (!cin.eof())
+                {
+                    counter ++;
+                    clock_t t_b4_test = clock();
+                    Document * streamdoc = get_str2doc(streamdoc_line);
+
+                    update_streaming_naive(
+                                            streamdoc, 
+                                            D,
+                                            W,
+                                            C,
+                                            K,
+                                            ALPHA,
+                                            ETA,
+                                            M,
+                                            BURNIN_PER_DOC,
+                                            S,
+                                            TAO,
+                                            KAPPA,
+                                            S2,
+                                            TAO2,
+                                            KAPPA2,
+                                            mat_N_theta,
+                                            mat_N_phi,
+                                            mat_N_phi_hat,
+                                            mat_N_Z_hat,
+                                            mat_N_Z,
+                                            doc_iter);
+                }
+            }
+            cerr << "Streamed doc#: " << counter << endl;
+            get_mat_posterior_prob_phi(mat_N_phi, ETA, mat_posterior_prob_phi);
         }
 
         // output results to files
@@ -827,6 +945,7 @@ int main( int argc,      // Number of strings in array argv
                 cerr << "done, time spent: " << float(clock() - t_b4_write)/CLOCKS_PER_SEC << " secs" << endl << endl;
             }
         }
+
  
         // output doc-topic, topic-word for human consumption
         if (f_doctopic != "")
@@ -902,7 +1021,7 @@ int main( int argc,      // Number of strings in array argv
         /////////////////////////////////////////////////////////////
         //the following are optional, subsequent modes after training
         /////////////////////////////////////////////////////////////
-
+        
         // mode 1: output to STDERR perplexity of the test file
         //TODO: jimmy foulds says this test is cheating, because we optimize theta for test doc first. To not cheat, there are two ways:
         //1) split each test doc into two parts, making sure words are disjoint; then estimate theta on one part and calculate perplexity on the other
@@ -937,9 +1056,11 @@ int main( int argc,      // Number of strings in array argv
 
             for (int tj=0; tj<D_test; tj++)
             {
-                Document * testdoc = documents_test[tj];
-                clock_t t_b4_test = clock();
 
+                Document * testdoc = documents_test[tj];
+                
+                clock_t t_b4_test = clock();
+                   
                 // get paired (doc_ind, score) vector with similarity measure
                 vector< pair<int, double> > pair_docind_score;
                 if (SIMILAR_METRIC == "l2")
