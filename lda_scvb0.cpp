@@ -646,6 +646,11 @@ int main( int argc,      // Number of strings in array argv
         ValueArg<double> stopChangeArg("","stopchange","Optional convergence criterion: stop scvb0 training if the relative change of perplexity is below this number. This is calculated at the end of a sweep, as (prev_pp - curr_pp)/prev_pp", false, 0.0005,"double");
         cmd.add( stopChangeArg );
 
+        ValueArg<double> iterDiscountArg("","iterdiscount","Discount iteration starting number for streaming mode", false, 1.0,"double");
+        cmd.add( iterDiscountArg );
+
+
+
         ValueArg<int> numTopicArg("k","ktopics","Number of topics for LDA model", false, 100,"int");
         cmd.add( numTopicArg );
 
@@ -722,6 +727,7 @@ int main( int argc,      // Number of strings in array argv
 
         const int SWEEP = sweepArg.getValue();
         const double STOP_CHANGE = stopChangeArg.getValue();
+        const double ITER_DISCOUNT = iterDiscountArg.getValue();
         int K = numTopicArg.getValue();
 
         const double ALPHA=alphaArg.getValue();
@@ -763,6 +769,7 @@ int main( int argc,      // Number of strings in array argv
         cerr << "Output topicword2 file: " << f_topicword2 << endl;
 
         cerr << "K: " << K << "\tSWEEP: " << SWEEP << "\tSTOP_CHANGE: " << STOP_CHANGE << endl;
+        cerr << "ITER_DISCOUNT: " << ITER_DISCOUNT << endl;
         cerr << "ALPHA: " << ALPHA << "\tETA: " << ETA << endl;
         cerr << "M: " << M << "\tBURNIN_PER_DOC: " << BURNIN_PER_DOC << endl;
         cerr << "S: " << S << "\tTAO: " << TAO << "\tKAPPA: " << KAPPA << endl; 	
@@ -865,6 +872,8 @@ int main( int argc,      // Number of strings in array argv
         // streaming mode
         if (naiveStreaming)
         {
+            doc_iter *= ITER_DISCOUNT;
+
             MatrixXd mat_N_phi_hat = MatrixXd::Constant(W, K, 0);
             MatrixXd mat_N_Z_hat = MatrixXd::Constant(1, K, 0);
             MatrixXd mat_N_Z = mat_N_phi.colwise().sum();
